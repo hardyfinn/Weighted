@@ -1,0 +1,223 @@
+// Offline checks for WeightedEngine.hpp.
+//   c++ -std=c++11 -O2 -o test/engine_test test/engine_test.cpp && test/engine_test
+#include "../src/WeightedEngine.hpp"
+#include <cstdio>
+
+using namespace weighted;
+
+static int failures = 0;
+#define CHECK(cond, ...)                         \
+	do {                                         \
+		if (!(cond)) {                           \
+			failures++;                          \
+			std::printf("FAIL %s:%d: ", __FILE__, __LINE__); \
+			std::printf(__VA_ARGS__);            \
+			std::printf("\n");                   \
+		}                                        \
+	} while (0)
+
+static Table make(int scale, int profile, double focus = 1.0, bool invert = false) {
+	Settings s;
+	s.scale = scale;
+	s.profile = profile;
+	s.focus = focus;
+	s.invert = invert;
+	Table T;
+	std::vector<UserPoint> none;
+	buildTable(T, s, none, nullptr, nullptr);
+	return T;
+}
+
+int main() {
+	// 1. Every scale/profile gives a valid table that sums to 1.
+	for (int sc = 0; sc < NUM_SCALES; sc++) {
+		for (int p = 0; p < NUM_PROFILES; p++) {
+			Table T = make(sc, p);
+			double s = 0, sl = 0;
+			for (int k = 0; k < T.n; k++) {
+				CHECK(std::isfinite(T.w[k]) && T.w[k] > 0, "scale %d profile %d tone %d weight %g", sc, p, k, T.w[k]);
+				s += T.w[k];
+				sl += T.land[k];
+			}
+			CHECK(std::fabs(s - 1) < 1e-9 && std::fabs(sl - 1) < 1e-9, "scale %d profile %d sums %g %g", sc, p, s, sl);
+		}
+	}
+
+	// 2. Bins: with uniform input, each note occurs as often as its weight.
+	{
+		Rng r;
+		for (int sc : {0, 1, 8, 11, 12, 14}) {
+			for (int p : {P_ROCK, P_FOLK, P_PATHET2, P_FLAT}) {
+				Table T = make(sc, p);
+				std::vector<double> cnt(T.n, 0.0);
+				const int M = 400000;
+				for (int i = 0; i < M; i++) {
+					Note n = pickBins(T, T.w, r.uniform(), 3, -1, nullptr, 0, 0);
+					cnt[n.k] += 1;
+				}
+				double worst = 0;
+				for (int k = 0; k < T.n; k++) worst = std::max(worst, std::fabs(cnt[k] / M - T.w[k]));
+				CHECK(worst < 0.004, "scale %d profile %d distribution off by %g", sc, p, worst);
+			}
+		}
+	}
+
+	// 3. Bins keep the contour: higher input never gives a lower note.
+	{
+		Table T = make(1, P_ROCK, 2.0);
+		double last = -1e9;
+		bool ok = true;
+		for (int i = 0; i < 10000; i++) {
+			Note n = pickBins(T, T.w, i / 10000.0, 4, -2, nullptr, 0, 0);
+			double c = noteCents(T, n);
+			if (c < last) ok = false;
+			last = c;
+		}
+		CHECK(ok, "bins not monotonic");
+		Note lo = pickBins(T, T.w, 0.0, 4, -2, nullptr, 0, 0);
+		Note hi = pickBins(T, T.w, 0.9999999, 4, -2, nullptr, 0, 0);
+		CHECK(lo.oct == -2 && lo.k == 0, "lowest note %d/%d", lo.oct, lo.k);
+		CHECK(hi.oct == 1 && hi.k == T.n - 1, "highest note %d/%d", hi.oct, hi.k);
+	}
+
+	// 4. Focus 0 is a plain quantizer; higher Focus sharpens the root.
+	{
+		Table T0 = make(1, P_ROCK, 0.0);
+		for (int k = 0; k < T0.n; k++) CHECK(std::fabs(T0.w[k] - 1.0 / T0.n) < 1e-9, "focus 0 not flat");
+		Table T1 = make(1, P_ROCK, 1.0), T2 = make(1, P_ROCK, 2.0);
+		CHECK(T2.w[0] > T1.w[0] && T1.w[0] > T0.w[0], "focus does not sharpen root: %g %g %g", T0.w[0], T1.w[0], T2.w[0]);
+		// Rock minor melody masked to natural minor: root should be about 35%
+		CHECK(std::fabs(T1.w[0] - 0.356) < 0.01, "rock minor root weight %g", T1.w[0]);
+	}
+
+	// 5. Profile values match the published data (Essen major: 5 > 3 > 1 > 2).
+	{
+		Table T = make(0, P_FOLK);
+		// major scale tones: 1 2 3 4 5 6 7 -> idx 0..6
+		CHECK(T.w[4] > T.w[2] && T.w[2] > T.w[0] && T.w[0] > T.w[1] && T.w[1] > T.w[3], "Essen order wrong");
+		CHECK(std::fabs(T.w[4] - 0.2228) < 0.003, "Essen 5 = %g", T.w[4]);
+	}
+
+	// 6. Invert makes the weakest tone the strongest.
+	{
+		Table T = make(1, P_ROCK), I = make(1, P_ROCK, 1.0, true);
+		int weakest = 0, strongestI = 0;
+		for (int k = 0; k < T.n; k++) {
+			if (T.w[k] < T.w[weakest]) weakest = k;
+			if (I.w[k] > I.w[strongestI]) strongestI = k;
+		}
+		CHECK(weakest == strongestI, "invert: weakest %d, inverted strongest %d", weakest, strongestI);
+	}
+
+	// 7. Landing profile boosts the two strongest tones.
+	{
+		Table T = make(0, P_CLASSICAL);
+		CHECK(T.land[0] > T.w[0] && T.land[4] > T.w[4] && T.land[1] < T.w[1], "landing boost wrong");
+	}
+
+	// 8. Gamelan: pathet weights and tunings.
+	{
+		Table S = make(11, P_PATHET1);  // slendro nem: stress 2, avoid 1
+		CHECK(S.w[1] > S.w[3] && S.w[0] < S.w[2], "slendro nem roles");
+		CHECK(std::fabs(S.tuning[2] - 480) < 1e-9, "slendro tuning %g", S.tuning[2]);
+		Table P = make(12, P_PATHET3);  // pelog barang: tone 1 and 4 rare, 6 strongest
+		int top = 0;
+		for (int k = 0; k < P.n; k++) if (P.w[k] > P.w[top]) top = k;
+		CHECK(top == 5 && P.w[0] < 0.05 && P.w[3] < 0.07, "pelog barang roles top=%d", top);
+		Table B = make(14, P_PATHET3);  // pelog barang scale: tones 2 3 5 6 7
+		CHECK(B.n == 5 && B.labels[0] == "2" && B.labels[4] == "7", "pelog barang labels");
+		Settings s;
+		s.scale = 11;
+		s.gamelanTuning = 1;
+		Table Q;
+		std::vector<UserPoint> none;
+		buildTable(Q, s, none, nullptr, nullptr);
+		CHECK(std::fabs(Q.tuning[1] - 200) < 1e-9 && std::fabs(Q.tuning[2] - 500) < 1e-9, "12-TET snap %g %g", Q.tuning[1], Q.tuning[2]);
+	}
+
+	// 9. Gravity: nearest note, then pulled to a stronger neighbour in reach.
+	{
+		Table T = make(0, P_CLASSICAL);  // C major
+		Note n = nearestNote(T, 190.0);  // near D
+		CHECK(n.oct == 0 && n.k == 1, "nearest to 190 cents: %d/%d", n.oct, n.k);
+		Note g = gravityTarget(T, T.w, n, 300.0);  // C (238) is stronger than D and within reach
+		CHECK(g.oct == 0 && g.k == 0, "gravity from D went to %d/%d", g.oct, g.k);
+		Note n2 = nearestNote(T, 1150.0);  // B
+		CHECK(n2.k == 6 && n2.oct == 0, "nearest to 1150: %d/%d", n2.oct, n2.k);
+		Note g2 = gravityTarget(T, T.w, n2, 300.0);  // upper C, one octave up
+		CHECK(g2.oct == 1 && g2.k == 0, "gravity from B went to %d/%d", g2.oct, g2.k);
+		Note n3 = nearestNote(T, -40.0);
+		CHECK(n3.oct == 0 && n3.k == 0, "nearest to -40: %d/%d", n3.oct, n3.k);
+	}
+
+	// 10. Step makes intervals smaller on average.
+	{
+		Table T = make(1, P_ROCK);
+		for (double step : {0.0, 1.0}) {
+			Rng r;
+			Note prev;
+			double sum = 0;
+			const int M = 50000;
+			for (int i = 0; i < M; i++) {
+				Note n = pickBins(T, T.w, r.uniform(), 3, -1, i ? &prev : nullptr, step, 0);
+				if (i) sum += std::fabs(noteCents(T, n) - noteCents(T, prev));
+				prev = n;
+			}
+			static double first = 0;
+			if (step == 0.0) first = sum / M;
+			else CHECK(sum / M < 0.6 * first, "step: mean interval %g vs %g cents", sum / M, first);
+		}
+	}
+
+	// 11. No-repeat reduces repeated notes.
+	{
+		Table T = make(1, P_ROCK, 2.0);
+		int reps[2] = {0, 0};
+		for (int m = 0; m < 2; m++) {
+			Rng r;
+			Note prev;
+			for (int i = 0; i < 50000; i++) {
+				Note n = pickBins(T, T.w, r.uniform(), 1, 0, i ? &prev : nullptr, 0, m ? 1.0 : 0.0);
+				if (i && n == prev) reps[m]++;
+				prev = n;
+			}
+		}
+		CHECK(reps[1] < reps[0] / 4, "no-repeat: %d vs %d repeats", reps[1], reps[0]);
+	}
+
+	// 12. User profile: learned weights apply by pitch.
+	{
+		Settings s;
+		s.scale = 0;
+		s.profile = P_USER;
+		std::vector<UserPoint> u = {{0, 10}, {700, 5}, {400, 1}};
+		Table T;
+		buildTable(T, s, u, nullptr, nullptr);
+		CHECK(T.w[0] > T.w[4] && T.w[4] > T.w[2] && T.w[1] < T.w[2], "user profile order");
+	}
+
+	// 13. Scala parsing.
+	{
+		std::vector<double> c;
+		std::string err = parseScala("! slendro.scl\n!\nMy slendro\n 5\n!\n 231.0\n 474.5\n 717.0\n 955.0\n 2/1\n", c);
+		CHECK(err.empty() && c.size() == 5, "scala: %s size %d", err.c_str(), (int) c.size());
+		CHECK(c.size() == 5 && std::fabs(c[2] - 474.5) < 1e-9, "scala cents");
+		err = parseScala("x\n2\n3/2\n2/1\n", c);
+		CHECK(err.empty() && c.size() == 2 && std::fabs(c[1] - 701.955) < 0.01, "scala ratio %g", c.size() > 1 ? c[1] : 0.0);
+		CHECK(!parseScala("hello", c).empty(), "scala garbage accepted");
+		double custom[5] = {0, 231, 474.5, 717, 955};
+		Settings s;
+		s.scale = 11;
+		Table T;
+		std::vector<UserPoint> none;
+		buildTable(T, s, none, custom, nullptr);
+		CHECK(std::fabs(T.tuning[3] - 717) < 1e-9 && std::fabs(T.nominal[3] - 720) < 1e-9, "custom slendro tuning");
+	}
+
+	if (failures) {
+		std::printf("%d check(s) failed\n", failures);
+		return 1;
+	}
+	std::printf("All engine checks passed\n");
+	return 0;
+}

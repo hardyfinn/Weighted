@@ -1,0 +1,23 @@
+{
+  "slug": "Weighted",
+  "name": "Weighted",
+  "version": "2.0.0",
+  "license": "GPL-3.0-or-later",
+  "brand": "Haer",
+  "author": "Haer",
+  "authorEmail": "",
+  "authorUrl": "",
+  "pluginUrl": "",
+  "manualUrl": "",
+  "sourceUrl": "https://github.com/hardyfinn/Weighted",
+  "donateUrl": "",
+  "changelogUrl": "",
+  "modules": [
+    {
+      "slug": "Weighted",
+      "name": "Weighted",
+      "description": "Weighted quantizer: random CV in, notes out, with strong scale degrees chosen more often. Profiles from music research and gamelan pathet, with Focus, accents, step preference and slendro/pelog tunings",
+      "tags": ["Quantizer", "Random", "Polyphonic"]
+    }
+  ]
+}
