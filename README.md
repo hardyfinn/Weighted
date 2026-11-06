@@ -21,6 +21,12 @@ listening experiments) or from the roles of tones in Javanese gamelan pathet.
 - **Bottom line:** Focus value, Invert and mode on the left; the last note,
   its weight and LAND (when it was an accented note) on the right. While
   learning it shows how many notes have been counted.
+- **Draw your own weights:** click a bar and drag up or down to set that
+  tone's weight. Dragging across the bars draws several at once. The first
+  click copies the current weights into the User profile and switches Profile
+  to User, so you start from what you hear and adjust it. (The weights you
+  draw are what you hear at Focus 1; other Focus settings still sharpen or
+  flatten them.)
 
 ## Knobs and buttons
 
@@ -82,6 +88,18 @@ profile works on any scale: weights are matched by pitch.
 - No-repeat (off, low, medium, high): makes the same note twice in a row less likely
 - Landing boost: how much accented notes favour the two strongest tones (x1.5, x2, x3)
 - Trigger output: every new note, or only pitch changes
+- **Phrase ending:** the last step of the accent cycle (set by Length) always
+  lands home, on the first scale tone or on the strongest tone (best for
+  gamelan scales, where the first tone may not be the strongest). Gives loops
+  a sense of closure. Works with Trig patched
+- **Drift:** each tone's weight wanders slowly on its own (slow, about a
+  minute; medium, about 20 s; fast, about 5 s), between roughly a third and
+  nearly three times its normal weight. The pattern keeps its character but
+  its balance keeps shifting. The display shows DRIFT and the bars move
+- **Chord on V/Oct:** V/Oct (and Trig) become polyphonic and add the 3rd, the
+  3rd and 5th, or the 5th above each note, counted in scale steps, so chords
+  always stay in the scale. Patch V/Oct to a polyphonic voice. With
+  polyphonic CV in, channels are limited so the total stays at 16
 - Gamelan tuning: the slendro/pelog tuning (default or loaded), or snap to 12-TET
 - Load a Scala tuning (.scl): 5 notes per octave replaces slendro, 7 replaces pelog
 - Clear the User profile

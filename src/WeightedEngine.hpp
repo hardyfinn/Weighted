@@ -266,8 +266,9 @@ inline void normalise(double* v, int n) {
 
 // Build the table. customSlendro / customPelog: tuning tables in cents
 // (from a Scala file), or null for the defaults.
+// mult: optional per-tone multipliers (used by Drift), or null.
 inline void buildTable(Table& T, const Settings& st, const std::vector<UserPoint>& user,
-                       const double* customSlendro, const double* customPelog) {
+                       const double* customSlendro, const double* customPelog, const double* mult = nullptr) {
 	const ScaleDef& s = SCALES[std::max(0, std::min(NUM_SCALES - 1, st.scale))];
 	T.n = s.n;
 	for (int k = 0; k < s.n; k++) {
@@ -292,6 +293,8 @@ inline void buildTable(Table& T, const Settings& st, const std::vector<UserPoint
 	normalise(T.raw, T.n);
 	// Floor: every scale tone stays possible (1% before Focus)
 	for (int k = 0; k < T.n; k++) T.raw[k] = std::max(T.raw[k], 0.01);
+	if (mult)
+		for (int k = 0; k < T.n; k++) T.raw[k] *= mult[k];
 	normalise(T.raw, T.n);
 
 	double base[12];
@@ -399,6 +402,61 @@ inline Note gravityTarget(const Table& T, const double* weights, const Note& nea
 	}
 	return best;
 }
+
+// Move a note up (or down) by a number of scale steps, e.g. +2 = the next
+// "third" in the scale, +4 = the next "fifth".
+inline Note addSteps(const Table& T, const Note& n, int steps) {
+	int i = n.oct * T.n + n.k + steps;
+	Note r;
+	r.oct = (int) std::floor((double) i / T.n);
+	r.k = i - r.oct * T.n;
+	return r;
+}
+
+inline int strongestIndex(const double* w, int n) {
+	int best = 0;
+	for (int k = 1; k < n; k++)
+		if (w[k] > w[best]) best = k;
+	return best;
+}
+
+// The note with tone index k in the octave that puts it nearest to `near`.
+inline Note nearestWithTone(const Table& T, int k, const Note& near) {
+	double c0 = noteCents(T, near);
+	Note best;
+	double bd = 1e18;
+	for (int o = near.oct - 1; o <= near.oct + 1; o++) {
+		Note c;
+		c.oct = o;
+		c.k = k;
+		double d = std::fabs(noteCents(T, c) - c0);
+		if (d < bd) { bd = d; best = c; }
+	}
+	return best;
+}
+
+// ---------------------------------------------------------------- Drift
+// Each tone's weight is multiplied by a slowly wandering factor. Every
+// `period` seconds each tone gets a new random target; the factor glides
+// there smoothly. depth 1 = factors between about x0.37 and x2.7.
+struct Drift {
+	double from[12] = {}, to[12] = {};
+	double phase = 1.0;
+	void advance(double dt, double period, Rng& rng) {
+		phase += dt / std::max(0.1, period);
+		if (phase >= 1.0) {
+			phase -= std::floor(phase);
+			for (int k = 0; k < 12; k++) {
+				from[k] = to[k];
+				to[k] = 2.0 * rng.uniform() - 1.0;
+			}
+		}
+	}
+	void multipliers(double depth, double* out) const {
+		double t = phase * phase * (3.0 - 2.0 * phase);
+		for (int k = 0; k < 12; k++) out[k] = std::exp(depth * (from[k] + (to[k] - from[k]) * t));
+	}
+};
 
 // ---------------------------------------------------------------- Scala
 // Parse a Scala .scl file into cents (tone 1 = 0). Returns an error string,

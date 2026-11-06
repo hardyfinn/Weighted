@@ -225,6 +225,56 @@ int main() {
 		CHECK(std::string(PROFILE_SHORT[P_USER]) == "USER" && NUM_PROFILES == 16, "profile list");
 	}
 
+	// 15. Chord steps, strongest tone, phrase-ending helper.
+	{
+		Table T = make(0, P_CLASSICAL);  // C major
+		Note n;
+		n.oct = 0;
+		n.k = 5;  // A
+		Note t = addSteps(T, n, 2), f = addSteps(T, n, 4);
+		CHECK(t.oct == 1 && t.k == 0 && f.oct == 1 && f.k == 2, "A minor triad: %d/%d %d/%d", t.oct, t.k, f.oct, f.k);
+		Note d = addSteps(T, n, -6);
+		CHECK(d.oct == -1 && d.k == 6, "down steps %d/%d", d.oct, d.k);
+		CHECK(strongestIndex(T.w, T.n) == 0, "strongest in classical major");
+		Table B = make(14, P_PATHET3);  // pelog barang: 2 3 5 6 7, strongest = 6
+		CHECK(B.labels[strongestIndex(B.w, B.n)] == "6", "pelog barang strongest");
+		Note hi;
+		hi.oct = 0;
+		hi.k = 6;  // B
+		Note r = nearestWithTone(T, 0, hi);
+		CHECK(r.oct == 1 && r.k == 0, "nearest root to B is the C above: %d/%d", r.oct, r.k);
+	}
+
+	// 16. Drift multipliers stay in range and move smoothly.
+	{
+		Drift dr;
+		Rng r;
+		double m[12], prev[12];
+		dr.advance(0.0, 1.0, r);
+		dr.multipliers(1.0, prev);
+		double worstJump = 0, lo = 1e9, hi = 0;
+		for (int i = 0; i < 48000; i++) {
+			dr.advance(1.0 / 48000.0 * 64, 5.0, r);
+			dr.multipliers(1.0, m);
+			for (int k = 0; k < 12; k++) {
+				worstJump = std::max(worstJump, std::fabs(std::log(m[k]) - std::log(prev[k])));
+				lo = std::min(lo, m[k]);
+				hi = std::max(hi, m[k]);
+				prev[k] = m[k];
+			}
+		}
+		CHECK(lo > 0.36 && hi < 2.72 && worstJump < 0.05, "drift range %g..%g jump %g", lo, hi, worstJump);
+		Settings s;
+		s.scale = 1;
+		s.profile = P_ROCK;
+		Table A, D;
+		std::vector<UserPoint> none;
+		buildTable(A, s, none, nullptr, nullptr);
+		double mult[12] = {0.5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+		buildTable(D, s, none, nullptr, nullptr, mult);
+		CHECK(D.w[0] < A.w[0], "drift multiplier lowers the root");
+	}
+
 	if (failures) {
 		std::printf("%d check(s) failed\n", failures);
 		return 1;

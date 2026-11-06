@@ -5,6 +5,7 @@
 #include "WeightedEngine.hpp"
 #include <osdialog.h>
 #include <fstream>
+#include <mutex>
 #include <sstream>
 
 using namespace weighted;
@@ -58,6 +59,18 @@ struct Weighted : Module {
 	int boostSetting = 1;    // landing boost: 0 = x1.5, 1 = x2, 2 = x3
 	int gamelanTuning = 0;   // 0 = default or loaded table, 1 = snap to 12-TET
 	int trigMode = 0;        // 0 = every new note, 1 = only when the pitch changes
+	int phraseEnd = 0;       // 0 off, 1 = last step of the cycle lands on the first scale tone, 2 = on the strongest tone
+	int driftSetting = 0;    // 0 off, 1 slow, 2 medium, 3 fast
+	int chordSetting = 0;    // 0 off, 1 add 3rd, 2 add 3rd and 5th, 3 add 5th
+
+	// Drawing on the display (UI thread) hands new user weights to the audio thread
+	std::mutex drawMutex;
+	std::vector<UserPoint> pendingUser;
+	bool pendingFlag = false;
+
+	Drift drift;
+	double driftMult[12];
+	int driftCounter = 0;
 
 	// Loaded Scala tunings
 	bool haveSlendro = false, havePelog = false;
@@ -141,6 +154,7 @@ struct Weighted : Module {
 		configOutput(STABILITY_OUTPUT, "Stability (0-10 V: how strong the chosen note is)");
 		for (int i = 0; i < HISTORY; i++) history[i] = -1;
 		rng.seed(random::u64());
+		for (int k = 0; k < 12; k++) driftMult[k] = 1.0;
 	}
 
 	void onReset() override {
@@ -149,6 +163,9 @@ struct Weighted : Module {
 		boostSetting = 1;
 		gamelanTuning = 0;
 		trigMode = 0;
+		phraseEnd = 0;
+		driftSetting = 0;
+		chordSetting = 0;
 		haveSlendro = havePelog = false;
 		user.clear();
 		learning = false;
@@ -211,6 +228,23 @@ struct Weighted : Module {
 		// Root only shifts the output, so it doesn't need a rebuild.
 		Settings key = s;
 		key.root = 0;
+		if (pendingFlag && drawMutex.try_lock()) {
+			user = pendingUser;
+			pendingFlag = false;
+			drawMutex.unlock();
+			userVersion++;
+			tableVersion++;
+			params[PROFILE_PARAM].setValue(P_USER);
+			key.profile = s.profile = P_USER;
+		}
+		bool driftOn = driftSetting > 0;
+		if (driftOn && ++driftCounter >= 64) {
+			driftCounter = 0;
+			static const double periods[4] = {1.0, 60.0, 20.0, 5.0};
+			drift.advance(64.0 * args.sampleTime, periods[clamp(driftSetting, 0, 3)], rng);
+			drift.multipliers(1.0, driftMult);
+			tableVersion++;
+		}
 		if (key != settings || builtVersion != tableVersion) {
 			if (key.scale != settings.scale) {
 				clearHistory();
@@ -218,7 +252,8 @@ struct Weighted : Module {
 				if (learning) startLearning();
 			}
 			settings = key;
-			buildTable(table, settings, user, haveSlendro ? slendroCents : nullptr, havePelog ? pelogCents : nullptr);
+			buildTable(table, settings, user, haveSlendro ? slendroCents : nullptr, havePelog ? pelogCents : nullptr,
+			           driftOn ? driftMult : nullptr);
 			builtVersion = tableVersion;
 		}
 
@@ -240,7 +275,11 @@ struct Weighted : Module {
 		bool triggered = inputs[TRIG_INPUT].isConnected();
 		double rootVolts = s.root / 12.0;
 
+		static const int chordSteps[4][3] = {{0}, {0, 2}, {0, 2, 4}, {0, 4}};
+		static const int chordSize[4] = {1, 2, 3, 2};
+		int voices = chordSize[clamp(chordSetting, 0, 3)];
 		int channels = std::max(1, inputs[CV_INPUT].getChannels());
+		channels = std::min(channels, 16 / voices);
 		for (int c = 0; c < channels; c++) {
 			Channel& C = ch[c];
 			float v = inputs[CV_INPUT].getVoltage(c);
@@ -275,6 +314,12 @@ struct Weighted : Module {
 					else n = C.last;
 				}
 
+				// Phrase ending: the last step of the accent cycle lands home.
+				if (triggered && phraseEnd > 0 && C.counter == std::max(1, len) - 1) {
+					int home = phraseEnd == 1 ? 0 : strongestIndex(table.w, table.n);
+					n = nearestWithTone(table, home, C.hasLast ? C.last : n);
+				}
+
 				bool changed = !C.hasLast || n != C.last;
 				if (triggered ? (trigMode == 0 || changed) : changed) C.pulse.trigger(1e-3f);
 				if (c == 0 && (changed || triggered)) {
@@ -301,13 +346,17 @@ struct Weighted : Module {
 			}
 			const double* w = C.accent ? table.land : table.w;
 			double mx = C.accent ? table.maxLand : table.maxW;
-			outputs[VOCT_OUTPUT].setVoltage(rootVolts + noteCents(table, C.last) / 1200.0, c);
-			outputs[TRIG_OUTPUT].setVoltage(C.pulse.process(args.sampleTime) ? 10.f : 0.f, c);
+			float trigV = C.pulse.process(args.sampleTime) ? 10.f : 0.f;
+			for (int j = 0; j < voices; j++) {
+				Note cn = addSteps(table, C.last, chordSteps[clamp(chordSetting, 0, 3)][j]);
+				outputs[VOCT_OUTPUT].setVoltage(rootVolts + noteCents(table, cn) / 1200.0, c * voices + j);
+				outputs[TRIG_OUTPUT].setVoltage(trigV, c * voices + j);
+			}
 			outputs[DEGREE_OUTPUT].setVoltage((float) C.last.k, c);
 			outputs[STABILITY_OUTPUT].setVoltage(mx > 0 ? (float) (10.0 * w[C.last.k] / mx) : 0.f, c);
 		}
-		outputs[VOCT_OUTPUT].setChannels(channels);
-		outputs[TRIG_OUTPUT].setChannels(channels);
+		outputs[VOCT_OUTPUT].setChannels(channels * voices);
+		outputs[TRIG_OUTPUT].setChannels(channels * voices);
 		outputs[DEGREE_OUTPUT].setChannels(channels);
 		outputs[STABILITY_OUTPUT].setChannels(channels);
 
@@ -350,6 +399,9 @@ struct Weighted : Module {
 		json_object_set_new(r, "boost", json_integer(boostSetting));
 		json_object_set_new(r, "gamelanTuning", json_integer(gamelanTuning));
 		json_object_set_new(r, "trigMode", json_integer(trigMode));
+		json_object_set_new(r, "phraseEnd", json_integer(phraseEnd));
+		json_object_set_new(r, "drift", json_integer(driftSetting));
+		json_object_set_new(r, "chord", json_integer(chordSetting));
 		if (haveSlendro) {
 			json_t* a = json_array();
 			for (int i = 0; i < 5; i++) json_array_append_new(a, json_real(slendroCents[i]));
@@ -389,6 +441,9 @@ struct Weighted : Module {
 		geti("boost", boostSetting);
 		geti("gamelanTuning", gamelanTuning);
 		geti("trigMode", trigMode);
+		geti("phraseEnd", phraseEnd);
+		geti("drift", driftSetting);
+		geti("chord", chordSetting);
 		json_t* a = json_object_get(r, "slendro");
 		haveSlendro = a && json_array_size(a) == 5;
 		if (haveSlendro)
@@ -424,6 +479,56 @@ static const NVGcolor C_HIT = nvgRGB(0x7F, 0xD1, 0xC4);
 
 struct WeightDisplay : Widget {
 	Weighted* module = nullptr;
+	// bar geometry from the last draw, for clicking
+	float barTop = 0, barBottom = 0, barLeft = 0, barW = 0;
+	int barN = 0;
+	double barMax = 1.0;
+	// drawing state
+	bool drawing = false;
+	Vec dragPos;
+	std::vector<UserPoint> edit;
+	double editMax = 1.0;
+
+	void beginEdit() {
+		Weighted* m = module;
+		const Table& T = m->table;
+		edit.clear();
+		for (int k = 0; k < T.n; k++) edit.push_back({T.nominal[k], T.w[k]});
+		editMax = barMax;
+		drawing = true;
+	}
+
+	void editAt(Vec p) {
+		if (!module || barN <= 0 || barW <= 0 || (int) edit.size() != barN) return;
+		int k = (int) std::floor((p.x - barLeft) / barW);
+		if (k < 0 || k >= barN) return;
+		double frac = clamp((barBottom - p.y) / std::max(1.f, barBottom - barTop), 0.f, 1.f);
+		edit[k].weight = std::max(0.001, frac * editMax);
+		std::lock_guard<std::mutex> lock(module->drawMutex);
+		module->pendingUser = edit;
+		module->pendingFlag = true;
+	}
+
+	void onButton(const ButtonEvent& e) override {
+		if (module && e.button == GLFW_MOUSE_BUTTON_LEFT && e.action == GLFW_PRESS && e.pos.y >= barTop && e.pos.y <= barBottom) {
+			e.consume(this);
+			beginEdit();
+			dragPos = e.pos;
+			editAt(dragPos);
+			return;
+		}
+		Widget::onButton(e);
+	}
+
+	void onDragMove(const DragMoveEvent& e) override {
+		if (!drawing || e.button != GLFW_MOUSE_BUTTON_LEFT) return;
+		dragPos = dragPos.plus(e.mouseDelta.div(getAbsoluteZoom()));
+		editAt(dragPos);
+	}
+
+	void onDragEnd(const DragEndEvent& e) override {
+		drawing = false;
+	}
 
 	void text(const DrawArgs& a, float x, float y, const std::string& s, NVGcolor c, int align, float size) {
 		nvgFontSize(a.vg, size);
@@ -483,6 +588,12 @@ struct WeightDisplay : Widget {
 			if (total) mx = std::max(mx, share[k] / total);
 		}
 		if (mx <= 0) mx = 1;
+		barTop = top;
+		barBottom = bottom;
+		barLeft = pad;
+		barW = bw;
+		barN = n;
+		barMax = mx;
 		float hgt = bottom - top;
 		for (int k = 0; k < n; k++) {
 			float x = pad + k * bw;
@@ -504,8 +615,10 @@ struct WeightDisplay : Widget {
 		float by = H - pad - fsSmall * 0.4f;
 		std::string left;
 		if (m->learning) left = string::f("LEARNING  %d notes", m->learnTotal);
-		else left = string::f("FOCUS %.2f%s  %s", m->settings.focus, m->settings.invert ? " INV" : "",
-		                      m->params[Weighted::GRAVITY_PARAM].getValue() > 0.5f ? "GRAVITY" : "BINS");
+		else if (drawing) left = "DRAWING USER WEIGHTS";
+		else left = string::f("FOCUS %.2f%s  %s%s", m->settings.focus, m->settings.invert ? " INV" : "",
+		                      m->params[Weighted::GRAVITY_PARAM].getValue() > 0.5f ? "GRAVITY" : "BINS",
+		                      m->driftSetting > 0 ? "  DRIFT" : "");
 		text(args, pad, by, left, m->learning ? C_LAND : C_SOFT, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE, fsSmall);
 		if (m->lastK >= 0 && m->lastK < n)
 			text(args, W - pad, by, string::f("%s%s  %2.0f%%", m->lastAccent ? "LAND " : "", T.labels[m->lastK].c_str(), 100.0 * T.w[m->lastK]),
@@ -562,6 +675,15 @@ struct WeightedWidget : ModuleWidget {
 		menu->addChild(createIndexPtrSubmenuItem("No-repeat (triggered mode)", {"Off", "Low", "Medium", "High"}, &m->noRepeatSetting));
 		menu->addChild(createIndexPtrSubmenuItem("Landing boost (accented notes)", {"Top two tones x1.5", "Top two tones x2", "Top two tones x3"}, &m->boostSetting));
 		menu->addChild(createIndexPtrSubmenuItem("Trigger output", {"Every new note", "Only when the pitch changes"}, &m->trigMode));
+
+		menu->addChild(new MenuSeparator);
+		menu->addChild(createMenuLabel("Shape"));
+		menu->addChild(createIndexPtrSubmenuItem("Phrase ending (last step of the accent cycle)",
+			{"Off", "Lands on the first scale tone (root)", "Lands on the strongest tone"}, &m->phraseEnd));
+		menu->addChild(createIndexPtrSubmenuItem("Drift (weights wander on their own)",
+			{"Off", "Slow (about a minute)", "Medium (about 20 s)", "Fast (about 5 s)"}, &m->driftSetting));
+		menu->addChild(createIndexPtrSubmenuItem("Chord on V/Oct (polyphonic)",
+			{"Off (single note)", "Add the 3rd above (in the scale)", "Add the 3rd and 5th", "Add the 5th"}, &m->chordSetting));
 
 		menu->addChild(new MenuSeparator);
 		menu->addChild(createMenuLabel("Gamelan tuning"));
