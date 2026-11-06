@@ -49,10 +49,15 @@ listening experiments) or from the roles of tones in Javanese gamelan pathet.
 | Classical downbeats | Prince & Schmuckler (2014), notes on downbeats only |
 | Rock melody | Temperley & de Clercq (2013), vocal melodies of 200 rock songs |
 | Detroit Dorian | Designed: 1 strongest, then b3 and 5, b7, with 2 4 6 as colour |
+| House | Designed: Dorian/minor, 1 b3 5 b7 with the 9th (2) as colour. Try Dorian scale |
+| Gospel | Designed: major, 1 3 5 then 6 2 4, a little blue b3 and b7. Try Major or Chromatic |
+| Funk | Designed: one-chord vamp, 1 b7 b3 5, with the major 3rd rubbing against b3. Try Blues, Dorian or Chromatic |
+| Soul | Designed: major pentatonic core (1 5 3 6 2) with b3 and b7 bending in. Try Major or Chromatic |
+| Reggae | Designed: major pentatonic, bass-led, few 4s and 7s. Try Major; for a "one drop" feel set Length 4, Strong 3 |
 | Pathet 1, 2, 3 | Designed from the stressed, strong and avoided tones of each pathet. On slendro: nem, sanga, manyura. On pelog: lima, nem, barang |
 | User | Learned with the Learn button |
 
-The published profiles each have a major and a minor version. Weighted uses
+No published note counts exist for house, gospel, funk, soul or reggae, so those five are designed from the rock data and each style's habits. Their exact weights are in `src/WeightedEngine.hpp`. The published profiles each have a major and a minor version. Weighted uses
 the minor one when the scale has a minor third and no major third. Any
 profile works on any scale: weights are matched by pitch.
 

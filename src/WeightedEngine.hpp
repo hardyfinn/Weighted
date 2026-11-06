@@ -68,6 +68,11 @@ enum Profile {
 	P_DOWNBEAT,   // Prince & Schmuckler 2014, notes on downbeats
 	P_ROCK,       // Temperley & de Clercq 2013, rock vocal melodies
 	P_DETROIT,    // designed: minor/Dorian, 1 b3 5 b7 strong
+	P_HOUSE,      // designed: Dorian/minor, 1 b3 5 b7 with the 9th
+	P_GOSPEL,     // designed: major, 1 3 5 then 6 2 4, a little blue b3/b7
+	P_FUNK,       // designed: one-chord vamp, 1 b7 b3 5, 3 rubbing against b3
+	P_SOUL,       // designed: major pentatonic, b3 and b7 bending in
+	P_REGGAE,     // designed: major pentatonic, bass-led, few 4s and 7s
 	P_PATHET1,    // slendro nem / pelog lima (designed from pathet roles)
 	P_PATHET2,    // slendro sanga / pelog nem
 	P_PATHET3,    // slendro manyura / pelog barang
@@ -83,13 +88,18 @@ static const char* const PROFILE_NAMES[NUM_PROFILES] = {
 	"Classical downbeats (Prince & Schmuckler)",
 	"Rock melody (Temperley & de Clercq)",
 	"Detroit Dorian (designed)",
+	"House (designed)",
+	"Gospel (designed)",
+	"Funk (designed)",
+	"Soul (designed)",
+	"Reggae (designed)",
 	"Pathet 1: slendro nem / pelog lima",
 	"Pathet 2: slendro sanga / pelog nem",
 	"Pathet 3: slendro manyura / pelog barang",
 	"User (learned)",
 };
 static const char* const PROFILE_SHORT[NUM_PROFILES] = {
-	"FLAT", "FIT", "FOLK", "CLASSICAL", "DOWNBEAT", "ROCK", "DETROIT", "PATHET 1", "PATHET 2", "PATHET 3", "USER"};
+	"FLAT", "FIT", "FOLK", "CLASSICAL", "DOWNBEAT", "ROCK", "DETROIT", "HOUSE", "GOSPEL", "FUNK", "SOUL", "REGGAE", "PATHET 1", "PATHET 2", "PATHET 3", "USER"};
 
 // [profile - P_FIT][0 = major, 1 = minor][pitch class above root]
 static const double WESTERN_DATA[5][2][12] = {
@@ -106,6 +116,15 @@ static const double WESTERN_DATA[5][2][12] = {
 };
 // Designed, not measured: 1 strongest, b3 and 5 next, b7, then 2 4 6 as colour.
 static const double DETROIT_DATA[12] = {0.26, 0.004, 0.10, 0.18, 0.01, 0.08, 0.004, 0.17, 0.01, 0.06, 0.12, 0.01};
+// Designed style profiles (no published note counts exist for these styles).
+// Order: 1 b2 2 b3 3 4 #4 5 b6 6 b7 7
+static const double STYLE_DATA[5][12] = {
+	{0.24, 0.004, 0.10, 0.18, 0.01, 0.08, 0.004, 0.17, 0.01, 0.05, 0.13, 0.01},   // house
+	{0.20, 0.003, 0.12, 0.05, 0.17, 0.10, 0.005, 0.16, 0.005, 0.12, 0.04, 0.04},  // gospel
+	{0.25, 0.004, 0.08, 0.14, 0.07, 0.10, 0.01, 0.14, 0.005, 0.06, 0.16, 0.005},  // funk
+	{0.19, 0.003, 0.12, 0.07, 0.15, 0.08, 0.005, 0.16, 0.005, 0.13, 0.06, 0.04},  // soul
+	{0.24, 0.002, 0.13, 0.03, 0.17, 0.08, 0.003, 0.19, 0.003, 0.13, 0.03, 0.03},  // reggae
+};
 // Designed from the stressed / strong / avoided tones of each pathet.
 static const double SLENDRO_DATA[3][5] = {
 	{0.10, 0.30, 0.18, 0.24, 0.18},  // nem: stress 2, strong 5, avoid 1
@@ -208,6 +227,11 @@ inline double profileWeight(int profile, const ScaleDef& s, int k, double nomina
 		case P_DOWNBEAT:
 		case P_ROCK: return WESTERN_DATA[profile - P_FIT][minor ? 1 : 0][pc];
 		case P_DETROIT: return DETROIT_DATA[pc];
+		case P_HOUSE:
+		case P_GOSPEL:
+		case P_FUNK:
+		case P_SOUL:
+		case P_REGGAE: return STYLE_DATA[profile - P_HOUSE][pc];
 		case P_PATHET1:
 		case P_PATHET2:
 		case P_PATHET3: {

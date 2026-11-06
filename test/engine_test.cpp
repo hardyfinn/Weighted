@@ -214,6 +214,17 @@ int main() {
 		CHECK(std::fabs(T.tuning[3] - 717) < 1e-9 && std::fabs(T.nominal[3] - 720) < 1e-9, "custom slendro tuning");
 	}
 
+	// 14. Style profiles: house favours b3 and b7 on Dorian, gospel 3 and 6 on major.
+	{
+		Table H = make(2, P_HOUSE);  // Dorian: 1 2 b3 4 5 6 b7
+		CHECK(H.w[0] > H.w[2] && H.w[2] > H.w[1] && H.w[6] > H.w[5], "house order");
+		Table G = make(0, P_GOSPEL);  // major: 1 2 3 4 5 6 7
+		CHECK(G.w[2] > G.w[3] && G.w[5] > G.w[6], "gospel order");
+		Table R = make(0, P_REGGAE);
+		CHECK(R.w[4] > R.w[2] && R.w[6] < 0.05, "reggae order");
+		CHECK(std::string(PROFILE_SHORT[P_USER]) == "USER" && NUM_PROFILES == 16, "profile list");
+	}
+
 	if (failures) {
 		std::printf("%d check(s) failed\n", failures);
 		return 1;

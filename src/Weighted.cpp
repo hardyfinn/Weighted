@@ -344,6 +344,7 @@ struct Weighted : Module {
 
 	json_t* dataToJson() override {
 		json_t* r = json_object();
+		json_object_set_new(r, "profileLayout", json_integer(2));
 		json_object_set_new(r, "inputRange", json_integer(inputRange));
 		json_object_set_new(r, "noRepeat", json_integer(noRepeatSetting));
 		json_object_set_new(r, "boost", json_integer(boostSetting));
@@ -373,6 +374,12 @@ struct Weighted : Module {
 	}
 
 	void dataFromJson(json_t* r) override {
+		// Patches from 2.0.0 had Pathet 1-3 and User at 7-10; five style
+		// profiles were inserted before them in 2.1.0.
+		if (!json_object_get(r, "profileLayout")) {
+			float p = params[PROFILE_PARAM].getValue();
+			if (p >= 7.f) params[PROFILE_PARAM].setValue(p + 5.f);
+		}
 		auto geti = [&](const char* k, int& dst) {
 			json_t* j = json_object_get(r, k);
 			if (j) dst = json_integer_value(j);
