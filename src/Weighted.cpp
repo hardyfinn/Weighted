@@ -705,38 +705,43 @@ struct WeightedWidget : ModuleWidget {
 		addChild(createWidget<ScrewSilver>(Vec(RACK_GRID_WIDTH, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 		addChild(createWidget<ScrewSilver>(Vec(box.size.x - 2 * RACK_GRID_WIDTH, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
-		// Positions in mm, matching res/make_panel.py
-		WeightDisplay* d = createWidget<WeightDisplay>(mm2px(Vec(4.5, 15.0)));
-		d->box.size = mm2px(Vec(72.28, 28.0));
+		// Positions in mm, matching res/make_panel.py (20 HP)
+		WeightDisplay* d = createWidget<WeightDisplay>(mm2px(Vec(4.5, 14.0)));
+		d->box.size = mm2px(Vec(92.6, 22.0));
 		d->module = module;
 		addChild(d);
 
-		const float c1 = 14.0, c2 = 40.64, c3 = 67.28;
-		addParam(createParamCentered<Davies1900hWhiteKnob>(mm2px(Vec(c1, 52.0)), module, Weighted::ROOT_PARAM));
-		addParam(createParamCentered<Davies1900hWhiteKnob>(mm2px(Vec(c2, 52.0)), module, Weighted::SCALE_PARAM));
-		addParam(createParamCentered<Davies1900hWhiteKnob>(mm2px(Vec(c3, 52.0)), module, Weighted::PROFILE_PARAM));
-		addParam(createParamCentered<Davies1900hRedKnob>(mm2px(Vec(c1, 70.5)), module, Weighted::FOCUS_PARAM));
-		addParam(createParamCentered<Davies1900hWhiteKnob>(mm2px(Vec(c2, 70.5)), module, Weighted::STEP_PARAM));
-		addParam(createParamCentered<Davies1900hWhiteKnob>(mm2px(Vec(c3, 70.5)), module, Weighted::RANGE_PARAM));
+		float col[4], c5[5], ix[8];
+		for (int i = 0; i < 4; i++) col[i] = 12.7f + 25.4f * i;
+		for (int i = 0; i < 5; i++) c5[i] = 12.7f + 19.05f * i;
+		for (int i = 0; i < 8; i++) ix[i] = 7.6f + 12.343f * i;
+		const float rowA = 45.0, rowB = 65.0, rowC = 82.5, rowIn = 102.0, rowOut = 117.6;
 
-		const float rowC = 87.0;
-		addParam(createParamCentered<Trimpot>(mm2px(Vec(c1, rowC)), module, Weighted::FOCUS_ATT_PARAM));
-		addParam(createParamCentered<BefacoTinyKnob>(mm2px(Vec(29.0, rowC)), module, Weighted::LENGTH_PARAM));
-		addParam(createParamCentered<BefacoTinyKnob>(mm2px(Vec(41.5, rowC)), module, Weighted::STRONG_PARAM));
-		addChild(createLightCentered<SmallLight<RedLight>>(mm2px(Vec(47.0, rowC - 4.2)), module, Weighted::ACCENT_LIGHT));
-		addParam(createLightParamCentered<VCVLightLatch<MediumSimpleLight<WhiteLight>>>(mm2px(Vec(54.0, rowC)), module, Weighted::GRAVITY_PARAM, Weighted::GRAVITY_LIGHT));
-		addParam(createLightParamCentered<VCVLightLatch<MediumSimpleLight<WhiteLight>>>(mm2px(Vec(64.0, rowC)), module, Weighted::INVERT_PARAM, Weighted::INVERT_LIGHT));
-		addParam(createLightParamCentered<VCVLightBezel<YellowLight>>(mm2px(Vec(74.0, rowC)), module, Weighted::LEARN_PARAM, Weighted::LEARN_LIGHT));
+		addParam(createParamCentered<Davies1900hWhiteKnob>(mm2px(Vec(col[0], rowA)), module, Weighted::ROOT_PARAM));
+		addParam(createLightParamCentered<VCVLightLatch<MediumSimpleLight<RedLight>>>(mm2px(Vec(col[1], rowA)), module, Weighted::RELATIVE_PARAM, Weighted::RELATIVE_LIGHT));
+		addParam(createParamCentered<Davies1900hWhiteKnob>(mm2px(Vec(col[2], rowA)), module, Weighted::SCALE_PARAM));
+		addParam(createParamCentered<Davies1900hWhiteKnob>(mm2px(Vec(col[3], rowA)), module, Weighted::PROFILE_PARAM));
+
+		addParam(createParamCentered<Davies1900hRedKnob>(mm2px(Vec(col[0], rowB)), module, Weighted::FOCUS_PARAM));
+		addParam(createParamCentered<Davies1900hWhiteKnob>(mm2px(Vec(col[1], rowB)), module, Weighted::STEP_PARAM));
+		addParam(createParamCentered<Davies1900hWhiteKnob>(mm2px(Vec(col[2], rowB)), module, Weighted::RANGE_PARAM));
+		addParam(createParamCentered<Trimpot>(mm2px(Vec(col[3], rowB)), module, Weighted::FOCUS_ATT_PARAM));
+
+		addParam(createParamCentered<BefacoTinyKnob>(mm2px(Vec(c5[0], rowC)), module, Weighted::LENGTH_PARAM));
+		addParam(createParamCentered<BefacoTinyKnob>(mm2px(Vec(c5[1], rowC)), module, Weighted::STRONG_PARAM));
+		addChild(createLightCentered<SmallLight<RedLight>>(mm2px(Vec(c5[1] + 5.6f, rowC - 4.0f)), module, Weighted::ACCENT_LIGHT));
+		addParam(createLightParamCentered<VCVLightLatch<MediumSimpleLight<WhiteLight>>>(mm2px(Vec(c5[2], rowC)), module, Weighted::GRAVITY_PARAM, Weighted::GRAVITY_LIGHT));
+		addParam(createLightParamCentered<VCVLightLatch<MediumSimpleLight<WhiteLight>>>(mm2px(Vec(c5[3], rowC)), module, Weighted::INVERT_PARAM, Weighted::INVERT_LIGHT));
+		addParam(createLightParamCentered<VCVLightBezel<YellowLight>>(mm2px(Vec(c5[4], rowC)), module, Weighted::LEARN_PARAM, Weighted::LEARN_LIGHT));
 
 		const int ins[8] = {Weighted::CV_INPUT, Weighted::TRIG_INPUT, Weighted::ACCENT_INPUT, Weighted::ROOT_INPUT,
 		                    Weighted::SCALE_INPUT, Weighted::RELATIVE_INPUT, Weighted::PROFILE_INPUT, Weighted::FOCUS_INPUT};
 		for (int i = 0; i < 8; i++)
-			addInput(createInputCentered<PJ301MPort>(mm2px(Vec(6.6 + 9.725 * i, 102.4)), module, ins[i]));
+			addInput(createInputCentered<PJ301MPort>(mm2px(Vec(ix[i], rowIn)), module, ins[i]));
+		addParam(createParamCentered<BefacoTinyKnob>(mm2px(Vec(c5[0], rowOut)), module, Weighted::OCTAVE_PARAM));
 		const int outs[4] = {Weighted::VOCT_OUTPUT, Weighted::TRIG_OUTPUT, Weighted::DEGREE_OUTPUT, Weighted::STABILITY_OUTPUT};
 		for (int i = 0; i < 4; i++)
-			addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(25.0 + 14.6 * i, 116.8)), module, outs[i]));
-		addParam(createParamCentered<BefacoTinyKnob>(mm2px(Vec(11.0, 116.8)), module, Weighted::OCTAVE_PARAM));
-		addParam(createLightParamCentered<VCVLightLatch<MediumSimpleLight<RedLight>>>(mm2px(Vec(27.32, 52.0)), module, Weighted::RELATIVE_PARAM, Weighted::RELATIVE_LIGHT));
+			addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(c5[i + 1], rowOut)), module, outs[i]));
 	}
 
 	void appendContextMenu(Menu* menu) override {
