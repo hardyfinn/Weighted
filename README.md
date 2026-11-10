@@ -32,7 +32,7 @@ listening experiments) or from the roles of tones in Javanese gamelan pathet.
 
 | Control | What it does |
 |---|---|
-| **Root** | Home note, C to B. Shown in the display |
+| **Root** | Home note, around the circle of fifths: C G D A E B F# Db Ab Eb Bb F, so each click clockwise adds a sharp (or removes a flat). Shown in the display |
 | **Scale** | Major, natural minor, Dorian, Phrygian, Lydian, Mixolydian, harmonic minor, major and minor pentatonic, blues, chromatic, slendro, pelog (all 7 tones), pelog bem (1 2 3 5 6), pelog barang (2 3 5 6 7) |
 | **Profile** | Where the weights come from (see below) |
 | **Focus** | 0 = plain quantizer (all notes equal). 1 = the profile as published. Up to 3 = exaggerated, the strong notes take over. Weights are raised to this power |

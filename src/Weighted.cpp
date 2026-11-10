@@ -129,8 +129,9 @@ struct Weighted : Module {
 
 	Weighted() {
 		config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
-		std::vector<std::string> roots(ROOT_NAMES, ROOT_NAMES + 12);
-		configSwitch(ROOT_PARAM, 0.f, 11.f, 0.f, "Root", roots);
+		std::vector<std::string> roots;
+		for (int i = 0; i < 12; i++) roots.push_back(ROOT_NAMES[fifthsToSemitone(i)]);
+		configSwitch(ROOT_PARAM, 0.f, 11.f, 0.f, "Root (circle of fifths from C)", roots);
 		std::vector<std::string> scales;
 		for (int i = 0; i < NUM_SCALES; i++) scales.push_back(SCALES[i].name);
 		configSwitch(SCALE_PARAM, 0.f, NUM_SCALES - 1, 1.f, "Scale", scales);
@@ -227,7 +228,7 @@ struct Weighted : Module {
 		Settings s;
 		int rootCv = 0;
 		if (inputs[ROOT_INPUT].isConnected()) rootCv = (int) std::round(inputs[ROOT_INPUT].getVoltage() * 12.f);
-		s.root = (int) params[ROOT_PARAM].getValue() + rootCv;
+		s.root = fifthsToSemitone((int) params[ROOT_PARAM].getValue()) + rootCv;
 		s.scale = cvIndex(SCALE_PARAM, SCALE_INPUT, NUM_SCALES);
 		s.profile = cvIndex(PROFILE_PARAM, PROFILE_INPUT, NUM_PROFILES);
 		// Relative: the gate flips the switch, so a sequencer can move in and out.
@@ -438,6 +439,7 @@ struct Weighted : Module {
 	json_t* dataToJson() override {
 		json_t* r = json_object();
 		json_object_set_new(r, "profileLayout", json_integer(2));
+		json_object_set_new(r, "rootLayout", json_integer(2));
 		json_object_set_new(r, "inputRange", json_integer(inputRange));
 		json_object_set_new(r, "noRepeat", json_integer(noRepeatSetting));
 		json_object_set_new(r, "boost", json_integer(boostSetting));
@@ -472,6 +474,9 @@ struct Weighted : Module {
 	void dataFromJson(json_t* r) override {
 		// Patches from 2.0.0 had Pathet 1-3 and User at 7-10; five style
 		// profiles were inserted before them in 2.1.0.
+		// Before 2.3.0 the Root knob was chromatic; it now follows the circle of fifths.
+		if (!json_object_get(r, "rootLayout"))
+			params[ROOT_PARAM].setValue(semitoneToFifths((int) std::round(params[ROOT_PARAM].getValue())));
 		if (!json_object_get(r, "profileLayout")) {
 			float p = params[PROFILE_PARAM].getValue();
 			if (p >= 7.f) params[PROFILE_PARAM].setValue(p + 5.f);

@@ -308,6 +308,15 @@ int main() {
 		}
 	}
 
+	// 19. Root knob follows the circle of fifths.
+	{
+		const int expect[12] = {0, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10, 5};
+		for (int i = 0; i < 12; i++) {
+			CHECK(fifthsToSemitone(i) == expect[i], "fifths %d -> %d", i, fifthsToSemitone(i));
+			CHECK(semitoneToFifths(fifthsToSemitone(i)) == i, "fifths round trip %d", i);
+		}
+	}
+
 	// 18. Relative major/minor.
 	{
 		int root = 0, scale = 0;

@@ -51,7 +51,10 @@ static const int NUM_SCALES = sizeof(SCALES) / sizeof(SCALES[0]);
 static const char* const WESTERN_LABELS[12] = {"1", "b2", "2", "b3", "3", "4", "#4", "5", "b6", "6", "b7", "7"};
 static const char* const SLENDRO_LABELS[5] = {"1", "2", "3", "5", "6"};
 static const char* const PELOG_LABELS[7] = {"1", "2", "3", "4", "5", "6", "7"};
-static const char* const ROOT_NAMES[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+static const char* const ROOT_NAMES[12] = {"C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"};
+// The Root knob walks the circle of fifths from C: C G D A E B F# Db Ab Eb Bb F.
+inline int fifthsToSemitone(int pos) { return ((pos * 7) % 12 + 12) % 12; }
+inline int semitoneToFifths(int semi) { return ((semi * 7) % 12 + 12) % 12; }  // 7 is its own inverse mod 12
 
 // Default gamelan tunings in cents. Real gamelan sets all differ: these are
 // rough guides (slendro as five equal steps, pelog as a subset of 9-tone
