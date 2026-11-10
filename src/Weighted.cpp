@@ -66,6 +66,8 @@ struct Weighted : Module {
 	int phraseEnd = 0;       // 0 off, 1 = last step of the cycle lands on the first scale tone, 2 = on the strongest tone
 	int driftSetting = 0;    // 0 off, 1 slow, 2 medium, 3 fast
 	int chordSetting = 0;    // 0 off, 1 add 3rd, 2 add 3rd and 5th, 3 add 5th
+	int relativeTiming = 0;  // 0 = Relative changes at once, 1 = at the end of the accent cycle
+	bool relativeApplied = false;
 
 	// Drawing on the display (UI thread) hands new user weights to the audio thread
 	std::mutex drawMutex;
@@ -180,6 +182,7 @@ struct Weighted : Module {
 		phraseEnd = 0;
 		driftSetting = 0;
 		chordSetting = 0;
+		relativeTiming = 0;
 		haveSlendro = havePelog = false;
 		user.clear();
 		learning = false;
@@ -234,6 +237,15 @@ struct Weighted : Module {
 		// Relative: the gate flips the switch, so a sequencer can move in and out.
 		bool relative = params[RELATIVE_PARAM].getValue() > 0.5f;
 		if (inputs[RELATIVE_INPUT].isConnected()) relative = relative != (inputs[RELATIVE_INPUT].getVoltage() >= 1.f);
+		// "At the end of the cycle": a change waits until the last step of the
+		// accent cycle has played, so the next phrase starts in the new key.
+		{
+			int cycle = std::max(1, (int) params[LENGTH_PARAM].getValue());
+			bool atBoundary = !inputs[TRIG_INPUT].isConnected() || ch[0].counter < 0 || ch[0].counter == cycle - 1;
+			if (relativeTiming == 0 || atBoundary) relativeApplied = relative;
+		}
+		bool relativeWaiting = relative != relativeApplied;
+		relative = relativeApplied;
 		bool relativeActive = relative && relativeKey(s.root, s.scale);
 		double focus = params[FOCUS_PARAM].getValue();
 		if (inputs[FOCUS_INPUT].isConnected())
@@ -407,7 +419,9 @@ struct Weighted : Module {
 		lights[GRAVITY_LIGHT].setBrightness(gravity ? 1.f : 0.f);
 		lights[INVERT_LIGHT].setBrightness(s.invert ? 1.f : 0.f);
 		lights[LEARN_LIGHT].setBrightnessSmooth(learning ? (0.5f + 0.5f * std::sin(args.frame * args.sampleTime * 8.f)) : 0.f, args.sampleTime);
-		lights[RELATIVE_LIGHT].setBrightness(relative ? (relativeActive ? 1.f : 0.25f) : 0.f);
+		// Waiting for the cycle to end: the light blinks.
+		if (relativeWaiting) lights[RELATIVE_LIGHT].setBrightness(std::fmod(args.frame * args.sampleTime, 0.25f) < 0.125f ? 1.f : 0.f);
+		else lights[RELATIVE_LIGHT].setBrightness(relative ? (relativeActive ? 1.f : 0.25f) : 0.f);
 		lights[ACCENT_LIGHT].setBrightnessSmooth(ch[0].accent ? 1.f : 0.f, args.sampleTime);
 	}
 
@@ -448,6 +462,7 @@ struct Weighted : Module {
 		json_object_set_new(r, "phraseEnd", json_integer(phraseEnd));
 		json_object_set_new(r, "drift", json_integer(driftSetting));
 		json_object_set_new(r, "chord", json_integer(chordSetting));
+		json_object_set_new(r, "relativeTiming", json_integer(relativeTiming));
 		if (haveSlendro) {
 			json_t* a = json_array();
 			for (int i = 0; i < 5; i++) json_array_append_new(a, json_real(slendroCents[i]));
@@ -493,6 +508,7 @@ struct Weighted : Module {
 		geti("phraseEnd", phraseEnd);
 		geti("drift", driftSetting);
 		geti("chord", chordSetting);
+		geti("relativeTiming", relativeTiming);
 		json_t* a = json_object_get(r, "slendro");
 		haveSlendro = a && json_array_size(a) == 5;
 		if (haveSlendro)
@@ -731,6 +747,8 @@ struct WeightedWidget : ModuleWidget {
 			{"Off", "Lands on the first scale tone (root)", "Lands on the strongest tone"}, &m->phraseEnd));
 		menu->addChild(createIndexPtrSubmenuItem("Drift (weights wander on their own)",
 			{"Off", "Slow (about a minute)", "Medium (about 20 s)", "Fast (about 5 s)"}, &m->driftSetting));
+		menu->addChild(createIndexPtrSubmenuItem("Relative changes",
+			{"At once", "At the end of the accent cycle (with Trig patched)"}, &m->relativeTiming));
 		menu->addChild(createIndexPtrSubmenuItem("Chord on V/Oct (polyphonic)",
 			{"Off (single note)", "Add the 3rd above (in the scale)", "Add the 3rd and 5th", "Add the 5th"}, &m->chordSetting));
 

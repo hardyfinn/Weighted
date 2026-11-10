@@ -99,6 +99,7 @@ profile works on any scale: weights are matched by pitch.
   minute; medium, about 20 s; fast, about 5 s), between roughly a third and
   nearly three times its normal weight. The pattern keeps its character but
   its balance keeps shifting. The display shows DRIFT and the bars move
+- **Relative changes:** at once, or at the end of the accent cycle (set by Length), so a gate that arrives mid-phrase changes the key when the next phrase starts. The Relative light blinks while a change is waiting. Works with Trig patched
 - **Chord on V/Oct:** V/Oct (and Trig) become polyphonic and add the 3rd, the
   3rd and 5th, or the 5th above each note, counted in scale steps, so chords
   always stay in the scale. Patch V/Oct to a polyphonic voice. With
