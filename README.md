@@ -37,11 +37,13 @@ listening experiments) or from the roles of tones in Javanese gamelan pathet.
 | **Profile** | Where the weights come from (see below) |
 | **Focus** | 0 = plain quantizer (all notes equal). 1 = the profile as published. Up to 3 = exaggerated, the strong notes take over. Weights are raised to this power |
 | **CV amt** | Attenuverter for the Focus CV input. 10 V moves Focus across its whole range |
-| **Step** | Prefers small intervals: the further a note is from the last one, the less likely it is. Works when Trig is patched |
-| **Range** | How many octaves the CV covers (1-5). The root's octave sits in the middle |
+| **Relative** | Same notes, new home: moves to the relative minor or major (C major becomes A minor, D Dorian becomes C major, F Lydian becomes A minor, major and minor pentatonic swap). The weights follow the new home. The display shows the key you hear. No effect on harmonic minor, blues, chromatic or the gamelan scales (the light glows dimly) |
+| **Step** | Prefers small intervals: the further a note is from the last one, the less likely it is. Each note still plays as often as its weight; only the size of the jumps changes. Works when Trig is patched |
+| **Range** | How many octaves the CV covers (1-5), from a root up to the root at the top, so 7 can step up to 1. The root's octave sits in the middle |
 | **Length / Strong** | An internal accent cycle, used when Accent in is unpatched: every Length triggers, the step number set by Strong is a landing beat. Strong 0 = off. For gamelan, set Strong to the last step (4 of 4) |
 | **Gravity** | Off = **Bins** mode: the whole CV range is re-weighted (higher CV still gives a higher note, so the contour survives). On = **Gravity** mode: CV is read as pitch, quantized to the nearest note, then sometimes pulled to a stronger note within 3 semitones. Focus sets how often (always at Focus 2 and above) |
 | **Invert** | Flips the hierarchy: rare notes become common |
+| **Octave** | -3 to +3 octaves on V/Oct. The last change before the pitch leaves the module (after root, range and chord) |
 | **Learn** | Press, play some notes into CV in (with Trig patched, or by moving the CV), press again. At least 8 notes. The counts become the User profile and Profile switches to User |
 
 ## Profiles
@@ -71,20 +73,21 @@ profile works on any scale: weights are matched by pitch.
 
 | Jack | What it does |
 |---|---|
-| **CV** in | The voltage to quantize. Polyphonic: each channel is its own melody. Bins mode reads -5 to +5 V by default (right-click for 0-10 V or 0-5 V). Gravity mode reads it as 1 V/oct pitch |
+| **CV** in | The voltage to quantize. Polyphonic: each channel is its own melody. Bins mode adapts to your CV's range by default (Auto); right-click for fixed -5 to +5 V, 0-10 V or 0-5 V. Gravity mode reads it as 1 V/oct pitch |
 | **Trig** in | Takes a new note on each trigger. Unpatched: follows CV continuously |
 | **Accent** in | High (above 1 V) when a note is taken = use the landing weights (the two strongest tones boosted) |
 | **Root** in | 1 V/oct, rounded to semitones, added to the Root knob |
 | **Scale**, **Profile** in | 10 V sweeps the whole list, added to the knob |
 | **Focus** in | Scaled by CV amt |
-| **V/Oct** out | The note. With Root on C, the root's middle octave is at 0 V (C4) |
+| **Rel** in | Gate: high (above 1 V) flips the Relative switch, so a sequencer can change the mood per section |
+| **V/Oct** out | The note. With Root on C and Octave at 0, the root's middle octave is at 0 V (C4) |
 | **Trig** out | A 1 ms trigger for each new note (right-click: only when the pitch changes) |
 | **Degree** out | Which scale tone was chosen, 1 V per step, first tone = 0 V |
 | **Stability** out | 0-10 V: how strong the chosen note is (10 V = the strongest tone). Patch it to a filter, VCA or decay so landing notes sound brighter, louder or longer |
 
 ## Right-click menu
 
-- CV input range for Bins mode
+- CV input range for Bins mode: Auto (the default; follows the lowest and highest CV seen recently), -5 to +5 V, 0-10 V or 0-5 V
 - No-repeat (off, low, medium, high): makes the same note twice in a row less likely
 - Landing boost: how much accented notes favour the two strongest tones (x1.5, x2, x3)
 - Trigger output: every new note, or only pitch changes

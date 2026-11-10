@@ -27,6 +27,7 @@ struct Weighted : Module {
 		INVERT_PARAM,
 		LEARN_PARAM,
 		RELATIVE_PARAM,
+		OCTAVE_PARAM,
 		PARAMS_LEN
 	};
 	enum InputId {
@@ -148,6 +149,8 @@ struct Weighted : Module {
 		configSwitch(GRAVITY_PARAM, 0.f, 1.f, 0.f, "Mode", {"Bins (re-weight the whole range)", "Gravity (nearest note, pulled to strong notes)"});
 		configSwitch(INVERT_PARAM, 0.f, 1.f, 0.f, "Invert (rare notes become common)", {"Off", "On"});
 		configSwitch(RELATIVE_PARAM, 0.f, 1.f, 0.f, "Relative (same notes, home moves to the relative minor or major)", {"Off", "On"});
+		configParam(OCTAVE_PARAM, -3.f, 3.f, 0.f, "Octave (shifts V/Oct, applied last)", " oct");
+		getParamQuantity(OCTAVE_PARAM)->snapEnabled = true;
 		configButton(LEARN_PARAM, "Learn: press, play some notes into CV in, press again");
 
 		configInput(CV_INPUT, "CV (random voltage, or pitch in Gravity mode)");
@@ -299,6 +302,7 @@ struct Weighted : Module {
 		float autoShrink = 1.f - std::exp(-args.sampleTime / 30.f);
 		bool triggered = inputs[TRIG_INPUT].isConnected();
 		double rootVolts = s.root / 12.0;
+		double octaveVolts = std::round(params[OCTAVE_PARAM].getValue());
 
 		static const int chordSteps[4][3] = {{0}, {0, 2}, {0, 2, 4}, {0, 4}};
 		static const int chordSize[4] = {1, 2, 3, 2};
@@ -388,7 +392,7 @@ struct Weighted : Module {
 			float trigV = C.pulse.process(args.sampleTime) ? 10.f : 0.f;
 			for (int j = 0; j < voices; j++) {
 				Note cn = addSteps(table, C.last, chordSteps[clamp(chordSetting, 0, 3)][j]);
-				outputs[VOCT_OUTPUT].setVoltage(rootVolts + noteCents(table, cn) / 1200.0, c * voices + j);
+				outputs[VOCT_OUTPUT].setVoltage(rootVolts + noteCents(table, cn) / 1200.0 + octaveVolts, c * voices + j);
 				outputs[TRIG_OUTPUT].setVoltage(trigV, c * voices + j);
 			}
 			outputs[DEGREE_OUTPUT].setVoltage((float) C.last.k, c);
@@ -697,13 +701,15 @@ struct WeightedWidget : ModuleWidget {
 		addParam(createLightParamCentered<VCVLightLatch<MediumSimpleLight<WhiteLight>>>(mm2px(Vec(64.0, rowC)), module, Weighted::INVERT_PARAM, Weighted::INVERT_LIGHT));
 		addParam(createLightParamCentered<VCVLightBezel<YellowLight>>(mm2px(Vec(74.0, rowC)), module, Weighted::LEARN_PARAM, Weighted::LEARN_LIGHT));
 
-		const int ins[7] = {Weighted::CV_INPUT, Weighted::TRIG_INPUT, Weighted::ACCENT_INPUT, Weighted::ROOT_INPUT,
-		                    Weighted::SCALE_INPUT, Weighted::PROFILE_INPUT, Weighted::FOCUS_INPUT};
-		for (int i = 0; i < 7; i++)
-			addInput(createInputCentered<PJ301MPort>(mm2px(Vec(7.64 + 11.0 * i, 103.0)), module, ins[i]));
+		const int ins[8] = {Weighted::CV_INPUT, Weighted::TRIG_INPUT, Weighted::ACCENT_INPUT, Weighted::ROOT_INPUT,
+		                    Weighted::SCALE_INPUT, Weighted::RELATIVE_INPUT, Weighted::PROFILE_INPUT, Weighted::FOCUS_INPUT};
+		for (int i = 0; i < 8; i++)
+			addInput(createInputCentered<PJ301MPort>(mm2px(Vec(6.6 + 9.725 * i, 103.0)), module, ins[i]));
 		const int outs[4] = {Weighted::VOCT_OUTPUT, Weighted::TRIG_OUTPUT, Weighted::DEGREE_OUTPUT, Weighted::STABILITY_OUTPUT};
 		for (int i = 0; i < 4; i++)
-			addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(13.0 + 18.43 * i, 119.0)), module, outs[i]));
+			addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(25.0 + 14.6 * i, 119.0)), module, outs[i]));
+		addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(11.0, 119.0)), module, Weighted::OCTAVE_PARAM));
+		addParam(createLightParamCentered<VCVLightLatch<MediumSimpleLight<WhiteLight>>>(mm2px(Vec(27.32, 52.0)), module, Weighted::RELATIVE_PARAM, Weighted::RELATIVE_LIGHT));
 	}
 
 	void appendContextMenu(Menu* menu) override {

@@ -15,6 +15,9 @@ FONT_BOLD = os.environ.get("PANEL_FONT_BOLD", "/usr/share/fonts/opentype/inter/I
 FONT_MED = os.environ.get("PANEL_FONT_MED", "/usr/share/fonts/opentype/inter/Inter-Medium.otf")
 
 W, H = 81.28, 128.5  # 16 HP
+IN_X0, IN_DX = 6.6, 9.725      # 8 input jacks
+OCT_X = 11.0                   # octave knob in the output box
+OUT_X0, OUT_DX = 25.0, 14.6    # 4 output jacks
 
 BRONZE = "#4A3826"
 BRONZE_DARK = "#3A2B1D"
@@ -91,6 +94,9 @@ c1, c2, c3 = 14.0, 40.64, 67.28
 for x, n in zip((c1, c2, c3), ("ROOT", "SCALE", "PROFILE")):
     add(text(n, x, 45.6, 2.3, FONT_BOLD, INK, spacing=0.06))
 add(text("names show in the display", W / 2, 60.2, 1.5, FONT_MED, SOFT))
+# relative switch between root and scale
+add(text("RELATIVE", 27.32, 47.0, 1.6, FONT_BOLD, INK))
+add(text("min / maj", 27.32, 57.2, 1.35, FONT_MED, SOFT))
 
 rule(62.2)
 
@@ -106,7 +112,8 @@ add(text("leaps", c2 - 7.6, 77.6, 1.5, FONT_MED, SOFT))
 add(text("steps", c2 + 7.6, 77.6, 1.5, FONT_MED, SOFT))
 add(text("RANGE", c3, 64.9, 2.3, FONT_BOLD, INK, spacing=0.06))
 for i in range(5):
-    tick(c3, 70.5, i / 4, str(i + 1) if i in (0, 4) else "")
+    if i != 2:  # the top tick would cross the RANGE label
+        tick(c3, 70.5, i / 4, str(i + 1) if i in (0, 4) else "")
 
 # row C
 rowC = 87.0
@@ -118,13 +125,18 @@ add(text("accent cycle  (strong 0 = off)", 35.25, 93.6, 1.35, FONT_MED, SOFT))
 rule(95.6)
 
 # inputs
-for i, n in enumerate(("CV", "TRIG", "ACCENT", "ROOT", "SCALE", "PROFILE", "FOCUS")):
-    add(text(n, 7.64 + 11.0 * i, 98.4, 1.6, FONT_BOLD, INK if i < 3 else SOFT))
+for i, n in enumerate(("CV", "TRIG", "ACCENT", "ROOT", "SCALE", "REL", "PROFILE", "FOCUS")):
+    add(text(n, IN_X0 + IN_DX * i, 98.4, 1.6, FONT_BOLD, INK if i < 3 else SOFT))
 
 # outputs
 add(f'<rect x="4.1" y="109.2" width="73.08" height="16.4" rx="1.2" fill="{OUTBOX}"/>')
+add(text("OCTAVE", OCT_X, 113.6, 1.75, FONT_BOLD, INK))
+tick(OCT_X, 119.0, 0.0, "", r0=4.4, r1=5.2)
+tick(OCT_X, 119.0, 1.0, "", r0=4.4, r1=5.2)
+add(text("-3", OCT_X - 6.2, 123.6, 1.4, FONT_BOLD, SOFT))
+add(text("+3", OCT_X + 6.2, 123.6, 1.4, FONT_BOLD, SOFT))
 for i, n in enumerate(("V/OCT", "TRIG", "DEGREE", "STABILITY")):
-    add(text(n, 13.0 + 18.43 * i, 113.6, 1.75, FONT_BOLD, GOLD if i == 3 else INK))
+    add(text(n, OUT_X0 + OUT_DX * i, 113.6, 1.75, FONT_BOLD, GOLD if i == 3 else INK))
 
 svg = (
     f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}mm" height="{H}mm" '
