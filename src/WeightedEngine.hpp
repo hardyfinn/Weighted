@@ -443,9 +443,9 @@ inline Note pickBins(const Table& T, const double* weights, double u, int range,
 // The relative major or minor: the same notes with a different home.
 // Major <-> natural minor, the modes go to the major or minor key that shares
 // their notes, major <-> minor pentatonic. The root moves by the smallest
-// interval (C major -> A minor goes down a minor third). Returns false (and changes
-// nothing) for scales with no relative: harmonic minor, blues, chromatic,
-// gamelan.
+// interval (C major -> A minor goes down a minor third). Harmonic minor goes
+// to its relative major, which changes one note (the raised 7th). Returns
+// false (and changes nothing) for blues, chromatic and the gamelan scales.
 inline bool relativeKey(int& root, int& scale) {
 	int to = -1, shift = 0;
 	switch (scale) {
@@ -455,6 +455,7 @@ inline bool relativeKey(int& root, int& scale) {
 		case 3: to = 0; shift = -4; break;  // E Phrygian -> C major
 		case 4: to = 1; shift = 4; break;   // F Lydian -> A minor
 		case 5: to = 1; shift = 2; break;   // G Mixolydian -> A minor
+		case 6: to = 0; shift = 3; break;   // A harmonic minor -> C major (G# becomes G)
 		case 7: to = 8; shift = -3; break;  // C major pent -> A minor pent
 		case 8: to = 7; shift = 3; break;   // A minor pent -> C major pent
 		default: return false;

@@ -68,6 +68,7 @@ struct Weighted : Module {
 	int chordSetting = 0;    // 0 off, 1 add 3rd, 2 add 3rd and 5th, 3 add 5th
 	int relativeTiming = 0;  // 0 = Relative changes at once, 1 = at the end of the accent cycle
 	bool relativeApplied = false;
+	bool relativeShown = false, relativePending = false;  // for the display
 
 	// Drawing on the display (UI thread) hands new user weights to the audio thread
 	std::mutex drawMutex;
@@ -247,6 +248,8 @@ struct Weighted : Module {
 		bool relativeWaiting = relative != relativeApplied;
 		relative = relativeApplied;
 		bool relativeActive = relative && relativeKey(s.root, s.scale);
+		relativeShown = relativeActive;
+		relativePending = relativeWaiting;
 		double focus = params[FOCUS_PARAM].getValue();
 		if (inputs[FOCUS_INPUT].isConnected())
 			focus += inputs[FOCUS_INPUT].getVoltage() / 10.f * 3.f * params[FOCUS_ATT_PARAM].getValue();
@@ -679,9 +682,10 @@ struct WeightDisplay : Widget {
 		std::string left;
 		if (m->learning) left = string::f("LEARNING  %d notes", m->learnTotal);
 		else if (drawing) left = "DRAWING USER WEIGHTS";
-		else left = string::f("FOCUS %.2f%s  %s%s", m->settings.focus, m->settings.invert ? " INV" : "",
+		else left = string::f("FOCUS %.2f%s  %s%s%s", m->settings.focus, m->settings.invert ? " INV" : "",
 		                      m->params[Weighted::GRAVITY_PARAM].getValue() > 0.5f ? "GRAVITY" : "BINS",
-		                      m->driftSetting > 0 ? "  DRIFT" : "");
+		                      m->driftSetting > 0 ? "  DRIFT" : "",
+		                      m->relativePending ? "  REL.." : (m->relativeShown ? "  REL" : ""));
 		text(args, pad, by, left, m->learning ? C_LAND : C_SOFT, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE, fsSmall);
 		if (m->lastK >= 0 && m->lastK < n)
 			text(args, W - pad, by, string::f("%s%s  %2.0f%%", m->lastAccent ? "LAND " : "", T.labels[m->lastK].c_str(), 100.0 * T.w[m->lastK]),

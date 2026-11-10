@@ -326,12 +326,14 @@ int main() {
 		CHECK(relativeKey(root, scale) && root == 0 && scale == 0, "D Dorian -> C major");
 		root = 0, scale = 7;
 		CHECK(relativeKey(root, scale) && root == -3 && scale == 8, "C maj pent -> A min pent");
-		root = 0, scale = 6;
-		CHECK(!relativeKey(root, scale) && root == 0 && scale == 6, "harmonic minor unchanged");
+		root = 9, scale = 6;
+		CHECK(relativeKey(root, scale) && root == 12 && scale == 0, "A harmonic minor -> C major");
+		root = 0, scale = 9;
+		CHECK(!relativeKey(root, scale) && root == 0 && scale == 9, "blues unchanged");
 		// Same notes before and after, for every scale with a relative.
 		for (int sc = 0; sc < NUM_SCALES; sc++) {
 			int r2 = 5, s2 = sc;
-			if (!relativeKey(r2, s2)) continue;
+			if (sc == 6 || !relativeKey(r2, s2)) continue;  // harmonic minor changes one note
 			int a = 0, b = 0;
 			for (int i = 0; i < SCALES[sc].n; i++) a |= 1 << ((5 + SCALES[sc].tones[i]) % 12);
 			for (int i = 0; i < SCALES[s2].n; i++) b |= 1 << (((r2 + SCALES[s2].tones[i]) % 12 + 12) % 12);
