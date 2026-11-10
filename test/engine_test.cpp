@@ -77,7 +77,7 @@ int main() {
 		Note lo = pickBins(T, T.w, 0.0, 4, -2, nullptr, 0, 0);
 		Note hi = pickBins(T, T.w, 0.9999999, 4, -2, nullptr, 0, 0);
 		CHECK(lo.oct == -2 && lo.k == 0, "lowest note %d/%d", lo.oct, lo.k);
-		CHECK(hi.oct == 1 && hi.k == T.n - 1, "highest note %d/%d", hi.oct, hi.k);
+		CHECK(hi.oct == 2 && hi.k == 0, "highest note should be the closing root: %d/%d", hi.oct, hi.k);
 	}
 
 	// 4. Focus 0 is a plain quantizer; higher Focus sharpens the root.
@@ -273,6 +273,61 @@ int main() {
 		double mult[12] = {0.5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 		buildTable(D, s, none, nullptr, nullptr, mult);
 		CHECK(D.w[0] < A.w[0], "drift multiplier lowers the root");
+	}
+
+	// 17. Step keeps note frequencies equal to the weights, and from the top 7
+	//     the walk goes up to the closing root as well as down.
+	{
+		for (int sc : {0, 1, 8, 12}) {
+			Table T = make(sc, P_ROCK);
+			for (double step : {0.5, 1.0}) {
+				for (int range : {1, 2, 4}) {
+					Rng r;
+					StepCache cache;
+					int lowOct = -(range / 2);
+					std::vector<double> cnt(T.n, 0.0);
+					Note prev;
+					long up71 = 0, from7 = 0;
+					const int M = 300000;
+					for (int i = 0; i < M; i++) {
+						Note n = pickBins(T, T.w, r.uniform(), range, lowOct, i ? &prev : nullptr, step, 0, &cache);
+						cnt[n.k] += 1;
+						if (i && prev.k == T.n - 1) {
+							from7++;
+							if (n.k == 0 && n.oct == prev.oct + 1) up71++;
+						}
+						prev = n;
+					}
+					double worst = 0;
+					for (int k = 0; k < T.n; k++) worst = std::max(worst, std::fabs(cnt[k] / M - T.w[k]));
+					CHECK(worst < 0.01, "scale %d step %g range %d: distribution off by %g", sc, step, range, worst);
+					CHECK(from7 > 0 && up71 > from7 / 20, "scale %d step %g range %d: 7 to 1 up %ld of %ld", sc, step,
+					      range, up71, from7);
+				}
+			}
+		}
+	}
+
+	// 18. Relative major/minor.
+	{
+		int root = 0, scale = 0;
+		CHECK(relativeKey(root, scale) && root == -3 && scale == 1, "C major -> A minor: %d %d", root, scale);
+		CHECK(relativeKey(root, scale) && root == 0 && scale == 0, "A minor -> C major: %d %d", root, scale);
+		root = 2, scale = 2;
+		CHECK(relativeKey(root, scale) && root == 0 && scale == 0, "D Dorian -> C major");
+		root = 0, scale = 7;
+		CHECK(relativeKey(root, scale) && root == -3 && scale == 8, "C maj pent -> A min pent");
+		root = 0, scale = 6;
+		CHECK(!relativeKey(root, scale) && root == 0 && scale == 6, "harmonic minor unchanged");
+		// Same notes before and after, for every scale with a relative.
+		for (int sc = 0; sc < NUM_SCALES; sc++) {
+			int r2 = 5, s2 = sc;
+			if (!relativeKey(r2, s2)) continue;
+			int a = 0, b = 0;
+			for (int i = 0; i < SCALES[sc].n; i++) a |= 1 << ((5 + SCALES[sc].tones[i]) % 12);
+			for (int i = 0; i < SCALES[s2].n; i++) b |= 1 << (((r2 + SCALES[s2].tones[i]) % 12 + 12) % 12);
+			CHECK(a == b, "relative of scale %d changes the notes", sc);
+		}
 	}
 
 	if (failures) {

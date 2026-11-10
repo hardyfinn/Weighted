@@ -329,28 +329,102 @@ inline double noteCents(const Table& T, const Note& n, bool useTuning = true) {
 }
 
 // ---------------------------------------------------------------- picking
-// Bins mode: u in [0, 1) spans `range` octaves starting at octave `lowOct`.
-// Each candidate note gets a slice as wide as its weight, in pitch order, so
-// a higher u never gives a lower note (when Step and No-repeat are 0).
+// Bins mode: u in [0, 1) spans `range` octaves starting at octave `lowOct`,
+// closed by the root at the top, so the range runs root to root. The bottom
+// and top roots get half a root's weight each, so every octave keeps the
+// profile's balance. Each candidate gets a slice as wide as its weight, in
+// pitch order, so a higher u never gives a lower note (when Step and
+// No-repeat are 0).
+//
+// Step: the slices are reweighted around the previous note by
+// K = exp(-0.35 * step * semitones). On its own that would change how often
+// each note plays (notes in the middle of the range, and notes near strong
+// ones, would gain). So the candidate weights are first balanced: we find v
+// with v_i * (K v)_i = base_i, which makes the base weights the long-run
+// frequencies of the walk (detailed balance). Step then changes only the
+// size of the intervals, not the note counts.
+struct StepCache {
+	bool valid = false;
+	int n = 0, range = 0, lowOct = 0;
+	double step = -1.0;
+	double weights[12] = {};
+	double nominal[12] = {};
+	double v[97] = {};  // balanced weights per candidate
+};
+
+inline int binCount(const Table& T, int range) { return T.n * range + 1; }
+
+inline Note binNote(const Table& T, int i, int lowOct) {
+	Note c;
+	c.oct = lowOct + i / T.n;
+	c.k = i % T.n;
+	return c;
+}
+
+inline void balanceStep(const Table& T, const double* weights, int range, int lowOct, double step, StepCache& C) {
+	int N = binCount(T, range);
+	double base[97], cents[97];
+	for (int i = 0; i < N; i++) {
+		Note c = binNote(T, i, lowOct);
+		base[i] = weights[c.k] * ((i == 0 || i == N - 1) ? 0.5 : 1.0);
+		cents[i] = noteCents(T, c, false);
+	}
+	if (step <= 0.0) {
+		for (int i = 0; i < N; i++) C.v[i] = base[i];
+	}
+	else {
+		static thread_local double K[97 * 97];
+		for (int i = 0; i < N; i++)
+			for (int j = 0; j < N; j++) K[i * N + j] = std::exp(-0.35 * step * std::fabs(cents[i] - cents[j]) / 100.0);
+		double v[97];
+		for (int i = 0; i < N; i++) v[i] = base[i];
+		for (int it = 0; it < 200; it++) {
+			double err = 0.0;
+			for (int i = 0; i < N; i++) {
+				double kv = 0.0;
+				for (int j = 0; j < N; j++) kv += K[i * N + j] * v[j];
+				double nv = kv > 0.0 ? std::sqrt(v[i] * base[i] / kv) : 0.0;
+				if (base[i] > 0.0) err = std::max(err, std::fabs(nv - v[i]) / std::max(nv, 1e-12));
+				v[i] = nv;
+			}
+			if (err < 1e-7) break;
+		}
+		for (int i = 0; i < N; i++) C.v[i] = v[i];
+	}
+	C.valid = true;
+	C.n = T.n;
+	C.range = range;
+	C.lowOct = lowOct;
+	C.step = step;
+	for (int k = 0; k < T.n; k++) { C.weights[k] = weights[k]; C.nominal[k] = T.nominal[k]; }
+}
+
+inline bool stepCacheMatches(const StepCache& C, const Table& T, const double* weights, int range, int lowOct, double step) {
+	if (!C.valid || C.n != T.n || C.range != range || C.lowOct != lowOct || C.step != step) return false;
+	for (int k = 0; k < T.n; k++)
+		if (C.weights[k] != weights[k] || C.nominal[k] != T.nominal[k]) return false;
+	return true;
+}
+
 // prev: the previous note, or null. step: 0-1 preference for small intervals.
 // noRepeat: 0-1, how much the previous note's weight is reduced.
+// cache: optional; keeps the Step balancing between calls.
 inline Note pickBins(const Table& T, const double* weights, double u, int range, int lowOct,
-                     const Note* prev, double step, double noRepeat) {
+                     const Note* prev, double step, double noRepeat, StepCache* cache = nullptr) {
 	range = std::max(1, std::min(8, range));
 	u = std::max(0.0, std::min(0.999999999, u));
-	int N = T.n * range;
-	double wid[96];
+	int N = binCount(T, range);
+	if (!prev) step = 0.0;
+	StepCache local;
+	StepCache& C = cache ? *cache : local;
+	if (!stepCacheMatches(C, T, weights, range, lowOct, step)) balanceStep(T, weights, range, lowOct, step, C);
+	double wid[97];
 	double total = 0.0;
 	double prevC = prev ? noteCents(T, *prev, false) : 0.0;
 	for (int i = 0; i < N; i++) {
-		Note c;
-		c.oct = lowOct + i / T.n;
-		c.k = i % T.n;
-		double x = weights[c.k];
-		if (prev && step > 0.0) {
-			double semis = std::fabs(noteCents(T, c, false) - prevC) / 100.0;
-			x *= std::exp(-0.35 * step * semis);
-		}
+		Note c = binNote(T, i, lowOct);
+		double x = C.v[i];
+		if (prev && step > 0.0) x *= std::exp(-0.35 * step * std::fabs(noteCents(T, c, false) - prevC) / 100.0);
 		if (prev && noRepeat > 0.0 && c == *prev) x *= (1.0 - 0.95 * noRepeat);
 		wid[i] = x;
 		total += x;
@@ -358,17 +432,33 @@ inline Note pickBins(const Table& T, const double* weights, double u, int range,
 	double target = u * total, acc = 0.0;
 	for (int i = 0; i < N; i++) {
 		acc += wid[i];
-		if (target < acc) {
-			Note c;
-			c.oct = lowOct + i / T.n;
-			c.k = i % T.n;
-			return c;
-		}
+		if (target < acc) return binNote(T, i, lowOct);
 	}
-	Note c;
-	c.oct = lowOct + range - 1;
-	c.k = T.n - 1;
-	return c;
+	return binNote(T, N - 1, lowOct);
+}
+
+// The relative major or minor: the same notes with a different home.
+// Major <-> natural minor, the modes go to the major or minor key that shares
+// their notes, major <-> minor pentatonic. The root moves by the smallest
+// interval (C major -> A minor goes down a minor third). Returns false (and changes
+// nothing) for scales with no relative: harmonic minor, blues, chromatic,
+// gamelan.
+inline bool relativeKey(int& root, int& scale) {
+	int to = -1, shift = 0;
+	switch (scale) {
+		case 0: to = 1; shift = -3; break;  // C major -> A minor
+		case 1: to = 0; shift = 3; break;   // A minor -> C major
+		case 2: to = 0; shift = -2; break;  // D Dorian -> C major
+		case 3: to = 0; shift = -4; break;  // E Phrygian -> C major
+		case 4: to = 1; shift = 4; break;   // F Lydian -> A minor
+		case 5: to = 1; shift = 2; break;   // G Mixolydian -> A minor
+		case 7: to = 8; shift = -3; break;  // C major pent -> A minor pent
+		case 8: to = 7; shift = 3; break;   // A minor pent -> C major pent
+		default: return false;
+	}
+	root += shift;
+	scale = to;
+	return true;
 }
 
 // The scale note nearest to a pitch given in cents above the root.

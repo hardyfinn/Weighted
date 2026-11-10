@@ -26,6 +26,7 @@ struct Weighted : Module {
 		GRAVITY_PARAM,
 		INVERT_PARAM,
 		LEARN_PARAM,
+		RELATIVE_PARAM,
 		PARAMS_LEN
 	};
 	enum InputId {
@@ -36,6 +37,7 @@ struct Weighted : Module {
 		SCALE_INPUT,
 		PROFILE_INPUT,
 		FOCUS_INPUT,
+		RELATIVE_INPUT,
 		INPUTS_LEN
 	};
 	enum OutputId {
@@ -50,11 +52,12 @@ struct Weighted : Module {
 		INVERT_LIGHT,
 		LEARN_LIGHT,
 		ACCENT_LIGHT,
+		RELATIVE_LIGHT,
 		LIGHTS_LEN
 	};
 
 	// Settings from the menu
-	int inputRange = 0;      // 0 = -5..+5 V, 1 = 0..10 V, 2 = 0..5 V
+	int inputRange = 3;      // 0 = -5..+5 V, 1 = 0..10 V, 2 = 0..5 V, 3 = auto
 	int noRepeatSetting = 0; // 0 off, 1 low, 2 medium, 3 high
 	int boostSetting = 1;    // landing boost: 0 = x1.5, 1 = x2, 2 = x3
 	int gamelanTuning = 0;   // 0 = default or loaded table, 1 = snap to 12-TET
@@ -96,6 +99,8 @@ struct Weighted : Module {
 	int tableVersion = -1;   // bumps when user or tunings change
 	int builtVersion = -2;
 	Table table;
+	StepCache stepCacheW, stepCacheLand;  // Step balancing for the main and landing weights
+	int lastRoot = 0;
 
 	struct Channel {
 		dsp::SchmittTrigger trig;
@@ -107,6 +112,9 @@ struct Weighted : Module {
 		int counter = -1;
 		bool accent = false;
 		float out = 0.f;
+		// Auto input range: the lowest and highest CV seen lately
+		float autoLo = 0.f, autoHi = 0.f;
+		bool autoInit = false;
 	};
 	Channel ch[16];
 
@@ -139,6 +147,7 @@ struct Weighted : Module {
 		configSwitch(STRONG_PARAM, 0.f, 16.f, 0.f, "Strong step (landing beat of the cycle)", strong);
 		configSwitch(GRAVITY_PARAM, 0.f, 1.f, 0.f, "Mode", {"Bins (re-weight the whole range)", "Gravity (nearest note, pulled to strong notes)"});
 		configSwitch(INVERT_PARAM, 0.f, 1.f, 0.f, "Invert (rare notes become common)", {"Off", "On"});
+		configSwitch(RELATIVE_PARAM, 0.f, 1.f, 0.f, "Relative (same notes, home moves to the relative minor or major)", {"Off", "On"});
 		configButton(LEARN_PARAM, "Learn: press, play some notes into CV in, press again");
 
 		configInput(CV_INPUT, "CV (random voltage, or pitch in Gravity mode)");
@@ -148,6 +157,7 @@ struct Weighted : Module {
 		configInput(SCALE_INPUT, "Scale CV (10 V sweeps the list)");
 		configInput(PROFILE_INPUT, "Profile CV (10 V sweeps the list)");
 		configInput(FOCUS_INPUT, "Focus CV (with the amount trimmer)");
+		configInput(RELATIVE_INPUT, "Relative gate (high flips the Relative switch)");
 		configOutput(VOCT_OUTPUT, "Pitch (1 V/oct, root at 0 V = C4 when Root is C)");
 		configOutput(TRIG_OUTPUT, "Trigger on each new note");
 		configOutput(DEGREE_OUTPUT, "Scale degree (1 V per scale step, first tone = 0 V)");
@@ -158,7 +168,7 @@ struct Weighted : Module {
 	}
 
 	void onReset() override {
-		inputRange = 0;
+		inputRange = 3;
 		noRepeatSetting = 0;
 		boostSetting = 1;
 		gamelanTuning = 0;
@@ -217,6 +227,10 @@ struct Weighted : Module {
 		s.root = (int) params[ROOT_PARAM].getValue() + rootCv;
 		s.scale = cvIndex(SCALE_PARAM, SCALE_INPUT, NUM_SCALES);
 		s.profile = cvIndex(PROFILE_PARAM, PROFILE_INPUT, NUM_PROFILES);
+		// Relative: the gate flips the switch, so a sequencer can move in and out.
+		bool relative = params[RELATIVE_PARAM].getValue() > 0.5f;
+		if (inputs[RELATIVE_INPUT].isConnected()) relative = relative != (inputs[RELATIVE_INPUT].getVoltage() >= 1.f);
+		bool relativeActive = relative && relativeKey(s.root, s.scale);
 		double focus = params[FOCUS_PARAM].getValue();
 		if (inputs[FOCUS_INPUT].isConnected())
 			focus += inputs[FOCUS_INPUT].getVoltage() / 10.f * 3.f * params[FOCUS_ATT_PARAM].getValue();
@@ -246,14 +260,21 @@ struct Weighted : Module {
 			tableVersion++;
 		}
 		if (key != settings || builtVersion != tableVersion) {
-			if (key.scale != settings.scale) {
+			bool scaleChanged = key.scale != settings.scale;
+			// Keep each channel's last pitch across a scale change (e.g. the
+			// Relative switch), so Step carries on from where the melody was.
+			double lastAbs[16];
+			if (scaleChanged) {
+				for (int c = 0; c < 16; c++) lastAbs[c] = 100.0 * lastRoot + noteCents(table, ch[c].last, false);
 				clearHistory();
-				for (int c = 0; c < 16; c++) ch[c].hasLast = ch[c].hasGravity = false;
+				for (int c = 0; c < 16; c++) ch[c].hasGravity = false;
 				if (learning) startLearning();
 			}
 			settings = key;
 			buildTable(table, settings, user, haveSlendro ? slendroCents : nullptr, havePelog ? pelogCents : nullptr,
 			           driftOn ? driftMult : nullptr);
+			if (scaleChanged)
+				for (int c = 0; c < 16; c++) ch[c].last = nearestNote(table, lastAbs[c] - 100.0 * s.root);
 			builtVersion = tableVersion;
 		}
 
@@ -272,6 +293,10 @@ struct Weighted : Module {
 		double noRepeat = noRepeatAmount(noRepeatSetting);
 		float lo = inputRange == 0 ? -5.f : 0.f;
 		float hi = inputRange == 1 ? 10.f : 5.f;
+		lastRoot = s.root;
+		// Auto range: widen at once to any new extreme, shrink back slowly
+		// (about 30 s) so a source that changes its range is followed.
+		float autoShrink = 1.f - std::exp(-args.sampleTime / 30.f);
 		bool triggered = inputs[TRIG_INPUT].isConnected();
 		double rootVolts = s.root / 12.0;
 
@@ -283,6 +308,11 @@ struct Weighted : Module {
 		for (int c = 0; c < channels; c++) {
 			Channel& C = ch[c];
 			float v = inputs[CV_INPUT].getVoltage(c);
+			if (inputRange == 3) {
+				if (!C.autoInit) { C.autoLo = C.autoHi = v; C.autoInit = true; }
+				C.autoLo = std::min(v, C.autoLo + (v - C.autoLo) * autoShrink);
+				C.autoHi = std::max(v, C.autoHi + (v - C.autoHi) * autoShrink);
+			}
 			bool take = true;
 			if (triggered) take = C.trig.process(inputs[TRIG_INPUT].getPolyVoltage(c), 0.1f, 1.f);
 			if (take) {
@@ -295,10 +325,19 @@ struct Weighted : Module {
 
 				Note n;
 				if (!gravity) {
-					double u = (v - lo) / (hi - lo);
+					double u;
+					if (inputRange == 3) {
+						// at least 1 V wide, so a still or barely moving CV sits in the middle
+						float span = C.autoHi - C.autoLo;
+						float mid = 0.5f * (C.autoHi + C.autoLo);
+						float a = span < 1.f ? mid - 0.5f : C.autoLo;
+						float b = span < 1.f ? mid + 0.5f : C.autoHi;
+						u = (v - a) / (b - a);
+					}
+					else u = (v - lo) / (hi - lo);
 					bool useHistory = triggered && C.hasLast;
 					n = pickBins(table, w, u, range, lowOct, useHistory ? &C.last : nullptr, triggered ? step : 0.0,
-					             triggered ? noRepeat : 0.0);
+					             triggered ? noRepeat : 0.0, accent ? &stepCacheLand : &stepCacheW);
 				}
 				else {
 					double cents = (v - rootVolts) * 1200.0;
@@ -363,6 +402,7 @@ struct Weighted : Module {
 		lights[GRAVITY_LIGHT].setBrightness(gravity ? 1.f : 0.f);
 		lights[INVERT_LIGHT].setBrightness(s.invert ? 1.f : 0.f);
 		lights[LEARN_LIGHT].setBrightnessSmooth(learning ? (0.5f + 0.5f * std::sin(args.frame * args.sampleTime * 8.f)) : 0.f, args.sampleTime);
+		lights[RELATIVE_LIGHT].setBrightness(relative ? (relativeActive ? 1.f : 0.25f) : 0.f);
 		lights[ACCENT_LIGHT].setBrightnessSmooth(ch[0].accent ? 1.f : 0.f, args.sampleTime);
 	}
 
@@ -562,9 +602,7 @@ struct WeightDisplay : Widget {
 		Weighted* m = module;
 		const Table& T = m->table;
 		const ScaleDef& sc = SCALES[m->settings.scale];
-		int root = ((int) m->params[Weighted::ROOT_PARAM].getValue() +
-		            (m->inputs[Weighted::ROOT_INPUT].isConnected() ? (int) std::round(m->inputs[Weighted::ROOT_INPUT].getVoltage() * 12.f) : 0)) % 12;
-		if (root < 0) root += 12;
+		int root = ((m->lastRoot % 12) + 12) % 12;
 
 		float ty = pad + fs * 0.5f;
 		text(args, pad, ty, string::f("%s %s", ROOT_NAMES[root], sc.shortName), C_INK, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, fs);
@@ -671,7 +709,7 @@ struct WeightedWidget : ModuleWidget {
 	void appendContextMenu(Menu* menu) override {
 		Weighted* m = getModule<Weighted>();
 		menu->addChild(new MenuSeparator);
-		menu->addChild(createIndexPtrSubmenuItem("CV input range (Bins mode)", {"-5 V to +5 V", "0 V to 10 V", "0 V to 5 V"}, &m->inputRange));
+		menu->addChild(createIndexPtrSubmenuItem("CV input range (Bins mode)", {"-5 V to +5 V", "0 V to 10 V", "0 V to 5 V", "Auto (follows your CV)"}, &m->inputRange));
 		menu->addChild(createIndexPtrSubmenuItem("No-repeat (triggered mode)", {"Off", "Low", "Medium", "High"}, &m->noRepeatSetting));
 		menu->addChild(createIndexPtrSubmenuItem("Landing boost (accented notes)", {"Top two tones x1.5", "Top two tones x2", "Top two tones x3"}, &m->boostSetting));
 		menu->addChild(createIndexPtrSubmenuItem("Trigger output", {"Every new note", "Only when the pitch changes"}, &m->trigMode));
