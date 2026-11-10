@@ -50,18 +50,23 @@ add(text("step", col[1], rowB + 10.3, L)); tick(col[1], rowB, 0, 6.9, 7.8); tick
 add(text("leaps", col[1] - 10.4, rowB + 7.4, 2.2, FM, GREY)); add(text("steps", col[1] + 10.4, rowB + 7.4, 2.2, FM, GREY))
 add(text("range", col[2], rowB + 10.3, L))
 for i in (0, 1, 3, 4): tick(col[2], rowB, i / 4, 6.9, 7.8)
-add(text("cv amt", col[3], rowB + 7.2, L * 0.9, FB, GREY))
-add(text("(focus)", col[3], rowB + 10.2, 2.2, FM, GREY))
+add(text("learn", col[3], rowB + 10.3, L))
 c5 = [12.7 + 19.05 * i for i in range(5)]
-for x, n in zip(c5, ("length", "strong", "gravity", "invert", "learn")):
+for x, n in zip(col, ("length", "strong", "gravity", "invert")):
     add(text(n, x, rowC + 8.6, L))
 rule(93.8)
-ix = [7.6 + 12.343 * i for i in range(8)]
-for i, n in enumerate(("cv", "trig", "accent", "root", "scale", "rel", "profile", "focus")):
-    add(text(n, ix[i], 97.6, 2.9, FB if i < 3 else FM, INK if i < 3 else GREY))
+ix = [7.6, 19.9, 32.3]
+for i, n in enumerate(("cv", "trig", "accent")):
+    add(text(n, ix[i], 97.6, 2.9, FB, INK))
+MODS = [(40.4, "a"), (68.9, "b")]   # block left edges
+for x0, n in MODS:
+    add(f'<rect x="{x0}" y="94.6" width="27.4" height="11.4" rx="1.2" fill="#DCD7CB"/>')
+    add(text("mod " + n, x0 + 5.4, 97.6, 2.9, FB, INK))
+    add(text("amt", x0 + 15.0, 97.6, 2.6, FM, GREY))
+    add(text("dest", x0 + 23.0, 97.6, 2.6, FM, GREY))
 add(f'<rect x="4.5" y="106.6" width="{W-9.0}" height="17.6" rx="0.6" fill="{INK}"/>')
 for x, n in zip(c5, ("octave", "v/oct", "trig", "degree", "stability")):
-    add(text(n, x, 111.3, L, FB, RED if n == "stability" else PAPER))
+    add(text(n, x, 111.3, L, FB, PAPER))
 add(text("-3", c5[0] - 6.6, 119.8, 2.2, FM, "#9a958b")); add(text("+3", c5[0] + 6.6, 119.8, 2.2, FM, "#9a958b"))
 open(os.path.join(HERE, "Weighted.svg"), "w").write(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}mm" height="{H}mm" viewBox="0 0 {W} {H}">' + "".join(p) + "</svg>")
 print("wrote Weighted.svg")

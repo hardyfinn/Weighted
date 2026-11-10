@@ -18,7 +18,7 @@ struct Weighted : Module {
 		SCALE_PARAM,
 		PROFILE_PARAM,
 		FOCUS_PARAM,
-		FOCUS_ATT_PARAM,
+		FOCUS_ATT_PARAM,  // unused since 2.4.0 (the Mod amount knobs replace it); kept so old patches load
 		STEP_PARAM,
 		RANGE_PARAM,
 		LENGTH_PARAM,
@@ -28,17 +28,20 @@ struct Weighted : Module {
 		LEARN_PARAM,
 		RELATIVE_PARAM,
 		OCTAVE_PARAM,
+		MODA_AMT_PARAM,
+		MODB_AMT_PARAM,
+		MODA_DEST_PARAM,
+		MODB_DEST_PARAM,
 		PARAMS_LEN
 	};
 	enum InputId {
 		CV_INPUT,
 		TRIG_INPUT,
 		ACCENT_INPUT,
-		ROOT_INPUT,
-		SCALE_INPUT,
-		PROFILE_INPUT,
-		FOCUS_INPUT,
-		RELATIVE_INPUT,
+		// Two assignable inputs. They take the ids of the old Root and Scale
+		// jacks, so those cables land on Mod A and Mod B in old patches.
+		MODA_INPUT,
+		MODB_INPUT,
 		INPUTS_LEN
 	};
 	enum OutputId {
@@ -66,6 +69,10 @@ struct Weighted : Module {
 	int phraseEnd = 0;       // 0 off, 1 = last step of the cycle lands on the first scale tone, 2 = on the strongest tone
 	int driftSetting = 0;    // 0 off, 1 slow, 2 medium, 3 fast
 	int chordSetting = 0;    // 0 off, 1 add 3rd, 2 add 3rd and 5th, 3 add 5th
+	// Mod A / Mod B destinations
+	enum ModDest { DEST_ROOT, DEST_SCALE, DEST_REL, DEST_PROFILE, DEST_FOCUS, NUM_DEST };
+	int modDest[2] = {DEST_FOCUS, DEST_ROOT};
+	dsp::BooleanTrigger destButton[2];
 	int relativeTiming = 0;  // 0 = Relative changes at once, 1 = at the end of the accent cycle
 	bool relativeApplied = false;
 	bool relativeShown = false, relativePending = false;  // for the display
@@ -141,7 +148,11 @@ struct Weighted : Module {
 		std::vector<std::string> profiles(PROFILE_NAMES, PROFILE_NAMES + NUM_PROFILES);
 		configSwitch(PROFILE_PARAM, 0.f, NUM_PROFILES - 1, P_ROCK, "Profile (where the weights come from)", profiles);
 		configParam(FOCUS_PARAM, 0.f, 3.f, 1.f, "Focus (0 = plain quantizer, 1 = profile as published, 3 = exaggerated)");
-		configParam(FOCUS_ATT_PARAM, -1.f, 1.f, 0.f, "Focus CV amount", "%", 0.f, 100.f);
+		configParam(FOCUS_ATT_PARAM, -1.f, 1.f, 0.f, "Unused");
+		configParam(MODA_AMT_PARAM, -1.f, 1.f, 1.f, "Mod A amount", "%", 0.f, 100.f);
+		configParam(MODB_AMT_PARAM, -1.f, 1.f, 1.f, "Mod B amount", "%", 0.f, 100.f);
+		configButton(MODA_DEST_PARAM, "Mod A destination (press to step: root, scale, rel, profile, focus)");
+		configButton(MODB_DEST_PARAM, "Mod B destination (press to step: root, scale, rel, profile, focus)");
 		configParam(STEP_PARAM, 0.f, 1.f, 0.f, "Step (prefer small intervals)", "%", 0.f, 100.f);
 		configParam(RANGE_PARAM, 1.f, 5.f, 2.f, "Range", " octaves");
 		paramQuantities[RANGE_PARAM]->snapEnabled = true;
@@ -160,11 +171,8 @@ struct Weighted : Module {
 		configInput(CV_INPUT, "CV (random voltage, or pitch in Gravity mode)");
 		configInput(TRIG_INPUT, "Trigger (take a new note; unpatched = follow CV continuously)");
 		configInput(ACCENT_INPUT, "Accent (high = use the landing profile)");
-		configInput(ROOT_INPUT, "Root CV (1 V/oct, rounded to semitones)");
-		configInput(SCALE_INPUT, "Scale CV (10 V sweeps the list)");
-		configInput(PROFILE_INPUT, "Profile CV (10 V sweeps the list)");
-		configInput(FOCUS_INPUT, "Focus CV (with the amount trimmer)");
-		configInput(RELATIVE_INPUT, "Relative gate (high flips the Relative switch)");
+		configInput(MODA_INPUT, "Mod A (destination shown in the display)");
+		configInput(MODB_INPUT, "Mod B (destination shown in the display)");
 		configOutput(VOCT_OUTPUT, "Pitch (1 V/oct, root at 0 V = C4 when Root is C)");
 		configOutput(TRIG_OUTPUT, "Trigger on each new note");
 		configOutput(DEGREE_OUTPUT, "Scale degree (1 V per scale step, first tone = 0 V)");
@@ -184,6 +192,8 @@ struct Weighted : Module {
 		driftSetting = 0;
 		chordSetting = 0;
 		relativeTiming = 0;
+		modDest[0] = DEST_FOCUS;
+		modDest[1] = DEST_ROOT;
 		haveSlendro = havePelog = false;
 		user.clear();
 		learning = false;
@@ -197,10 +207,15 @@ struct Weighted : Module {
 		lastK = -1;
 	}
 
-	int cvIndex(int param, int input, int count) {
-		float v = params[param].getValue();
-		if (inputs[input].isConnected()) v += inputs[input].getVoltage() / 10.f * count;
+	// Knob plus CV: 10 V sweeps the whole list.
+	int cvIndex(int param, float volts, int count) {
+		float v = params[param].getValue() + volts / 10.f * count;
 		return clamp((int) std::round(v), 0, count - 1);
+	}
+
+	static const char* destName(int d) {
+		static const char* n[NUM_DEST] = {"ROOT", "SCALE", "REL", "PROFILE", "FOCUS"};
+		return n[clamp(d, 0, NUM_DEST - 1)];
 	}
 
 	void startLearning() {
@@ -229,15 +244,27 @@ struct Weighted : Module {
 
 	void process(const ProcessArgs& args) override {
 		// ---- settings
+		// ---- Mod A / Mod B: each input (times its amount) goes to its destination;
+		// two inputs on the same destination add.
+		for (int i = 0; i < 2; i++)
+			if (destButton[i].process(params[MODA_DEST_PARAM + i].getValue() > 0.f)) modDest[i] = (modDest[i] + 1) % NUM_DEST;
+		float mod[NUM_DEST] = {};
+		bool modOn[NUM_DEST] = {};
+		for (int i = 0; i < 2; i++) {
+			if (!inputs[MODA_INPUT + i].isConnected()) continue;
+			int d = clamp(modDest[i], 0, NUM_DEST - 1);
+			mod[d] += inputs[MODA_INPUT + i].getVoltage() * params[MODA_AMT_PARAM + i].getValue();
+			modOn[d] = true;
+		}
+
 		Settings s;
-		int rootCv = 0;
-		if (inputs[ROOT_INPUT].isConnected()) rootCv = (int) std::round(inputs[ROOT_INPUT].getVoltage() * 12.f);
+		int rootCv = modOn[DEST_ROOT] ? (int) std::round(mod[DEST_ROOT] * 12.f) : 0;
 		s.root = fifthsToSemitone((int) params[ROOT_PARAM].getValue()) + rootCv;
-		s.scale = cvIndex(SCALE_PARAM, SCALE_INPUT, NUM_SCALES);
-		s.profile = cvIndex(PROFILE_PARAM, PROFILE_INPUT, NUM_PROFILES);
+		s.scale = cvIndex(SCALE_PARAM, mod[DEST_SCALE], NUM_SCALES);
+		s.profile = cvIndex(PROFILE_PARAM, mod[DEST_PROFILE], NUM_PROFILES);
 		// Relative: the gate flips the switch, so a sequencer can move in and out.
 		bool relative = params[RELATIVE_PARAM].getValue() > 0.5f;
-		if (inputs[RELATIVE_INPUT].isConnected()) relative = relative != (inputs[RELATIVE_INPUT].getVoltage() >= 1.f);
+		if (modOn[DEST_REL]) relative = relative != (mod[DEST_REL] >= 1.f);
 		// "At the end of the cycle": a change waits until the last step of the
 		// accent cycle has played, so the next phrase starts in the new key.
 		{
@@ -251,8 +278,7 @@ struct Weighted : Module {
 		relativeShown = relativeActive;
 		relativePending = relativeWaiting;
 		double focus = params[FOCUS_PARAM].getValue();
-		if (inputs[FOCUS_INPUT].isConnected())
-			focus += inputs[FOCUS_INPUT].getVoltage() / 10.f * 3.f * params[FOCUS_ATT_PARAM].getValue();
+		focus += mod[DEST_FOCUS] / 10.f * 3.f;
 		s.focus = clamp((float) focus, 0.f, 3.f);
 		s.invert = params[INVERT_PARAM].getValue() > 0.5f;
 		static const double boosts[3] = {1.5, 2.0, 3.0};
@@ -466,6 +492,8 @@ struct Weighted : Module {
 		json_object_set_new(r, "drift", json_integer(driftSetting));
 		json_object_set_new(r, "chord", json_integer(chordSetting));
 		json_object_set_new(r, "relativeTiming", json_integer(relativeTiming));
+		json_object_set_new(r, "modA", json_integer(modDest[0]));
+		json_object_set_new(r, "modB", json_integer(modDest[1]));
 		if (haveSlendro) {
 			json_t* a = json_array();
 			for (int i = 0; i < 5; i++) json_array_append_new(a, json_real(slendroCents[i]));
@@ -512,6 +540,14 @@ struct Weighted : Module {
 		geti("drift", driftSetting);
 		geti("chord", chordSetting);
 		geti("relativeTiming", relativeTiming);
+		// Before 2.4.0 Root and Scale had their own jacks, which are now Mod A and B.
+		if (!json_object_get(r, "modA")) {
+			modDest[0] = DEST_ROOT;
+			modDest[1] = DEST_SCALE;
+		}
+		geti("modA", modDest[0]);
+		geti("modB", modDest[1]);
+		for (int i = 0; i < 2; i++) modDest[i] = clamp(modDest[i], 0, NUM_DEST - 1);
 		json_t* a = json_object_get(r, "slendro");
 		haveSlendro = a && json_array_size(a) == 5;
 		if (haveSlendro)
@@ -637,6 +673,12 @@ struct WeightDisplay : Widget {
 		float ty = pad + fs * 0.5f;
 		text(args, pad, ty, string::f("%s %s", ROOT_NAMES[root], sc.shortName), C_INK, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, fs);
 		text(args, W - pad, ty, PROFILE_SHORT[m->settings.profile], C_BAR, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE, fs);
+		// Mod A / B destinations, bright when patched
+		for (int i = 0; i < 2; i++) {
+			bool on = m->inputs[Weighted::MODA_INPUT + i].isConnected();
+			text(args, W * (i ? 0.66f : 0.50f), ty, string::f("%c>%s", 'A' + i, Weighted::destName(m->modDest[i])),
+			     on ? C_HIT : C_SOFT, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE, fs);
+		}
 
 		// bars: target weight (filled), recent output share (teal tick)
 		int n = T.n;
@@ -711,10 +753,9 @@ struct WeightedWidget : ModuleWidget {
 		d->module = module;
 		addChild(d);
 
-		float col[4], c5[5], ix[8];
+		float col[4], c5[5];
 		for (int i = 0; i < 4; i++) col[i] = 12.7f + 25.4f * i;
 		for (int i = 0; i < 5; i++) c5[i] = 12.7f + 19.05f * i;
-		for (int i = 0; i < 8; i++) ix[i] = 7.6f + 12.343f * i;
 		const float rowA = 45.0, rowB = 65.0, rowC = 82.5, rowIn = 102.0, rowOut = 117.6;
 
 		addParam(createParamCentered<Davies1900hWhiteKnob>(mm2px(Vec(col[0], rowA)), module, Weighted::ROOT_PARAM));
@@ -725,19 +766,24 @@ struct WeightedWidget : ModuleWidget {
 		addParam(createParamCentered<Davies1900hRedKnob>(mm2px(Vec(col[0], rowB)), module, Weighted::FOCUS_PARAM));
 		addParam(createParamCentered<Davies1900hWhiteKnob>(mm2px(Vec(col[1], rowB)), module, Weighted::STEP_PARAM));
 		addParam(createParamCentered<Davies1900hWhiteKnob>(mm2px(Vec(col[2], rowB)), module, Weighted::RANGE_PARAM));
-		addParam(createParamCentered<Trimpot>(mm2px(Vec(col[3], rowB)), module, Weighted::FOCUS_ATT_PARAM));
+		addParam(createLightParamCentered<VCVLightBezel<YellowLight>>(mm2px(Vec(col[3], rowB)), module, Weighted::LEARN_PARAM, Weighted::LEARN_LIGHT));
 
-		addParam(createParamCentered<BefacoTinyKnob>(mm2px(Vec(c5[0], rowC)), module, Weighted::LENGTH_PARAM));
-		addParam(createParamCentered<BefacoTinyKnob>(mm2px(Vec(c5[1], rowC)), module, Weighted::STRONG_PARAM));
-		addChild(createLightCentered<SmallLight<RedLight>>(mm2px(Vec(c5[1] + 5.6f, rowC - 4.0f)), module, Weighted::ACCENT_LIGHT));
-		addParam(createLightParamCentered<VCVLightLatch<MediumSimpleLight<WhiteLight>>>(mm2px(Vec(c5[2], rowC)), module, Weighted::GRAVITY_PARAM, Weighted::GRAVITY_LIGHT));
-		addParam(createLightParamCentered<VCVLightLatch<MediumSimpleLight<WhiteLight>>>(mm2px(Vec(c5[3], rowC)), module, Weighted::INVERT_PARAM, Weighted::INVERT_LIGHT));
-		addParam(createLightParamCentered<VCVLightBezel<YellowLight>>(mm2px(Vec(c5[4], rowC)), module, Weighted::LEARN_PARAM, Weighted::LEARN_LIGHT));
+		addParam(createParamCentered<BefacoTinyKnob>(mm2px(Vec(col[0], rowC)), module, Weighted::LENGTH_PARAM));
+		addParam(createParamCentered<BefacoTinyKnob>(mm2px(Vec(col[1], rowC)), module, Weighted::STRONG_PARAM));
+		addChild(createLightCentered<SmallLight<RedLight>>(mm2px(Vec(col[1] + 5.6f, rowC - 4.0f)), module, Weighted::ACCENT_LIGHT));
+		addParam(createLightParamCentered<VCVLightLatch<MediumSimpleLight<WhiteLight>>>(mm2px(Vec(col[2], rowC)), module, Weighted::GRAVITY_PARAM, Weighted::GRAVITY_LIGHT));
+		addParam(createLightParamCentered<VCVLightLatch<MediumSimpleLight<WhiteLight>>>(mm2px(Vec(col[3], rowC)), module, Weighted::INVERT_PARAM, Weighted::INVERT_LIGHT));
 
-		const int ins[8] = {Weighted::CV_INPUT, Weighted::TRIG_INPUT, Weighted::ACCENT_INPUT, Weighted::ROOT_INPUT,
-		                    Weighted::SCALE_INPUT, Weighted::RELATIVE_INPUT, Weighted::PROFILE_INPUT, Weighted::FOCUS_INPUT};
-		for (int i = 0; i < 8; i++)
-			addInput(createInputCentered<PJ301MPort>(mm2px(Vec(ix[i], rowIn)), module, ins[i]));
+		addInput(createInputCentered<PJ301MPort>(mm2px(Vec(7.6, rowIn)), module, Weighted::CV_INPUT));
+		addInput(createInputCentered<PJ301MPort>(mm2px(Vec(19.9, rowIn)), module, Weighted::TRIG_INPUT));
+		addInput(createInputCentered<PJ301MPort>(mm2px(Vec(32.3, rowIn)), module, Weighted::ACCENT_INPUT));
+		const float modX[2] = {40.4f, 68.9f};  // left edges of the Mod A / Mod B blocks
+		const float rowMod = 101.6f;
+		for (int i = 0; i < 2; i++) {
+			addInput(createInputCentered<PJ301MPort>(mm2px(Vec(modX[i] + 5.4f, rowMod)), module, Weighted::MODA_INPUT + i));
+			addParam(createParamCentered<Trimpot>(mm2px(Vec(modX[i] + 15.0f, rowMod)), module, Weighted::MODA_AMT_PARAM + i));
+			addParam(createParamCentered<VCVButton>(mm2px(Vec(modX[i] + 23.0f, rowMod)), module, Weighted::MODA_DEST_PARAM + i));
+		}
 		addParam(createParamCentered<BefacoTinyKnob>(mm2px(Vec(c5[0], rowOut)), module, Weighted::OCTAVE_PARAM));
 		const int outs[4] = {Weighted::VOCT_OUTPUT, Weighted::TRIG_OUTPUT, Weighted::DEGREE_OUTPUT, Weighted::STABILITY_OUTPUT};
 		for (int i = 0; i < 4; i++)
@@ -758,6 +804,8 @@ struct WeightedWidget : ModuleWidget {
 			{"Off", "Lands on the first scale tone (root)", "Lands on the strongest tone"}, &m->phraseEnd));
 		menu->addChild(createIndexPtrSubmenuItem("Drift (weights wander on their own)",
 			{"Off", "Slow (about a minute)", "Medium (about 20 s)", "Fast (about 5 s)"}, &m->driftSetting));
+		menu->addChild(createIndexPtrSubmenuItem("Mod A destination", {"Root", "Scale", "Rel", "Profile", "Focus"}, &m->modDest[0]));
+		menu->addChild(createIndexPtrSubmenuItem("Mod B destination", {"Root", "Scale", "Rel", "Profile", "Focus"}, &m->modDest[1]));
 		menu->addChild(createIndexPtrSubmenuItem("Relative changes",
 			{"At once", "At the end of the accent cycle (with Trig patched)"}, &m->relativeTiming));
 		menu->addChild(createIndexPtrSubmenuItem("Chord on V/Oct (polyphonic)",

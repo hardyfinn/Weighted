@@ -36,7 +36,6 @@ listening experiments) or from the roles of tones in Javanese gamelan pathet.
 | **Scale** | Major, natural minor, Dorian, Phrygian, Lydian, Mixolydian, harmonic minor, major and minor pentatonic, blues, chromatic, slendro, pelog (all 7 tones), pelog bem (1 2 3 5 6), pelog barang (2 3 5 6 7) |
 | **Profile** | Where the weights come from (see below) |
 | **Focus** | 0 = plain quantizer (all notes equal). 1 = the profile as published. Up to 3 = exaggerated, the strong notes take over. Weights are raised to this power |
-| **CV amt** | Attenuverter for the Focus CV input. 10 V moves Focus across its whole range |
 | **Relative** | Same notes, new home: moves to the relative minor or major (C major becomes A minor, D Dorian becomes C major, F Lydian becomes A minor, major and minor pentatonic swap). The weights follow the new home. The display shows the key you hear. Harmonic minor goes to its relative major (its raised 7th drops back). No effect on blues, chromatic or the gamelan scales (the light glows dimly). The display shows REL while it's on |
 | **Step** | Prefers small intervals: the further a note is from the last one, the less likely it is. Each note still plays as often as its weight; only the size of the jumps changes. Works when Trig is patched |
 | **Range** | How many octaves the CV covers (1-5), from a root up to the root at the top, so 7 can step up to 1. The root's octave sits in the middle |
@@ -44,6 +43,7 @@ listening experiments) or from the roles of tones in Javanese gamelan pathet.
 | **Gravity** | Off = **Bins** mode: the whole CV range is re-weighted (higher CV still gives a higher note, so the contour survives). On = **Gravity** mode: CV is read as pitch, quantized to the nearest note, then sometimes pulled to a stronger note within 3 semitones. Focus sets how often (always at Focus 2 and above) |
 | **Invert** | Flips the hierarchy: rare notes become common |
 | **Octave** | -3 to +3 octaves on V/Oct. The last change before the pitch leaves the module (after root, range and chord) |
+| **Mod A, Mod B** | Two assignable CV inputs. Each has an **amt** knob (attenuverter, default 100%) and a **dest** button that steps through Root, Scale, Rel, Profile and Focus. The display's top line shows where each goes (bright when patched). Both on the same destination add together. Also settable from the right-click menu |
 | **Learn** | Press, play some notes into CV in (with Trig patched, or by moving the CV), press again. At least 8 notes. The counts become the User profile and Profile switches to User |
 
 ## Profiles
@@ -76,10 +76,7 @@ profile works on any scale: weights are matched by pitch.
 | **CV** in | The voltage to quantize. Polyphonic: each channel is its own melody. Bins mode adapts to your CV's range by default (Auto); right-click for fixed -5 to +5 V, 0-10 V or 0-5 V. Gravity mode reads it as 1 V/oct pitch |
 | **Trig** in | Takes a new note on each trigger. Unpatched: follows CV continuously |
 | **Accent** in | High (above 1 V) when a note is taken = use the landing weights (the two strongest tones boosted) |
-| **Root** in | 1 V/oct, rounded to semitones, added to the Root knob |
-| **Scale**, **Profile** in | 10 V sweeps the whole list, added to the knob |
-| **Focus** in | Scaled by CV amt |
-| **Rel** in | Gate: high (above 1 V) flips the Relative switch, so a sequencer can change the mood per section |
+| **Mod A**, **Mod B** in | Assignable (see above). As Root: 1 V/oct, rounded to semitones, added to the Root knob. As Scale or Profile: 10 V sweeps the whole list. As Rel: a gate, high (above 1 V) flips the Relative switch, so a sequencer can change the mood per section. As Focus: 10 V moves Focus across its whole range. Patches from before 2.4.0 load with Mod A on Root and Mod B on Scale (where those jacks were); cables in the old Profile, Focus and Rel jacks need re-patching |
 | **V/Oct** out | The note. With Root on C and Octave at 0, the root's middle octave is at 0 V (C4) |
 | **Trig** out | A 1 ms trigger for each new note (right-click: only when the pitch changes) |
 | **Degree** out | Which scale tone was chosen, 1 V per step, first tone = 0 V |
