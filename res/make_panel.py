@@ -13,24 +13,22 @@ from fontTools.pens.transformPen import TransformPen
 HERE = os.path.dirname(os.path.abspath(__file__))
 FONT_BOLD = os.environ.get("PANEL_FONT_BOLD", "/usr/share/fonts/opentype/inter/Inter-Bold.otf")
 FONT_MED = os.environ.get("PANEL_FONT_MED", "/usr/share/fonts/opentype/inter/Inter-Medium.otf")
+FONT_BLACK = os.environ.get("PANEL_FONT_BLACK", "/usr/share/fonts/opentype/inter/InterDisplay-Black.otf")
 
 W, H = 81.28, 128.5  # 16 HP
 IN_X0, IN_DX = 6.6, 9.725      # 8 input jacks
 OCT_X = 11.0                   # octave knob in the output box
 OUT_X0, OUT_DX = 25.0, 14.6    # 4 output jacks
 
-BRONZE = "#4A3826"
-BRONZE_DARK = "#3A2B1D"
-INK = "#F3E6CC"
-SOFT = "#C2AE8C"
-GOLD = "#D9A441"
-EMBER = "#E86A3A"
-OUTBOX = "#21180F"
+PAPER = "#ECE8DF"
+INK = "#151515"
+RED = "#D7362B"
+GREY = "#8A857B"
 
 fonts = {}
 
 
-def text(s, x, y, size, font=FONT_MED, fill=INK, anchor="middle", spacing=0.04):
+def text(s, x, y, size, font=FONT_MED, fill=INK, anchor="middle", spacing=0.0):
     """Return an SVG path for string s; (x, y) is the baseline point in mm."""
     if font not in fonts:
         f = TTFont(font)
@@ -59,84 +57,74 @@ parts = []
 add = parts.append
 
 
-def tick(cx, cy, value, label, r0=6.6, r1=7.6, fill=SOFT, size=1.6):
-    """A mark at a knob position (value 0..1 over Rack's -150..+150 degree sweep)."""
+def tick(cx, cy, value, r0, r1, label="", rl=None, fill=INK, size=1.4):
+    """A mark at a knob position (value 0..1 over a -150..+150 degree sweep)."""
     a = math.radians(-150 + 300 * value)
     sx, sy = math.sin(a), -math.cos(a)
     add(f'<line x1="{cx + r0 * sx:.3f}" y1="{cy + r0 * sy:.3f}" x2="{cx + r1 * sx:.3f}" '
-        f'y2="{cy + r1 * sy:.3f}" stroke="{fill}" stroke-width="0.35"/>')
+        f'y2="{cy + r1 * sy:.3f}" stroke="{fill}" stroke-width="0.25"/>')
     if label:
-        rl = r1 + 1.5
-        add(text(label, cx + rl * sx, cy + rl * sy + size * 0.36, size, FONT_BOLD, fill))
+        rl = rl or r1 + 1.4
+        add(text(label, cx + rl * sx, cy + rl * sy + size * 0.36, size, FONT_MED, GREY))
 
 
 def rule(y):
-    add(f'<line x1="3.0" y1="{y}" x2="{W - 3.0}" y2="{y}" stroke="{BRONZE_DARK}" stroke-width="0.5"/>')
+    add(f'<line x1="4.5" y1="{y}" x2="{W - 4.5}" y2="{y}" stroke="{INK}" stroke-width="0.18"/>')
 
 
-add(f'<rect width="{W}" height="{H}" fill="{BRONZE}"/>')
-# faint hammered texture: a few soft discs
-for i, (x, y, r) in enumerate([(12, 30, 9), (60, 58, 12), (30, 80, 10), (70, 100, 8), (20, 115, 7), (50, 20, 6)]):
-    add(f'<circle cx="{x}" cy="{y}" r="{r}" fill="{BRONZE_DARK}" opacity="0.18"/>')
+def label(s, x, y, size=1.9, fill=INK, font=None):
+    add(text(s, x, y, size, font or FONT_BOLD, fill))
 
-# title with a small weighted-bars mark
-add(text("WEIGHTED", 5.0, 9.4, 3.6, FONT_BOLD, INK, anchor="start", spacing=0.12))
-bars = [0.35, 0.7, 0.5, 1.0, 0.45]
-for i, b in enumerate(bars):
-    h = 4.2 * b
-    add(f'<rect x="{W - 26.0 + i * 2.1:.2f}" y="{9.6 - h:.2f}" width="1.4" height="{h:.2f}" fill="{GOLD if b == 1.0 else SOFT}"/>')
 
-# display window frame
-add(f'<rect x="4.1" y="11.6" width="73.08" height="30.8" rx="1.6" fill="#120E0A"/>')
+add(f'<rect width="{W}" height="{H}" fill="{PAPER}"/>')
 
-# row A: root, scale, profile
+# title
+add(text("weighted", 4.6, 11.4, 6.2, FONT_BLACK, INK, anchor="start", spacing=-0.02))
+add(f'<circle cx="{W - 6.2}" cy="9.3" r="1.5" fill="{RED}"/>')
+add(text("quantizer by weight", W - 9.0, 10.0, 1.6, FONT_MED, GREY, anchor="end"))
+# the display widget sits at (4.5, 15.0), 72.28 x 28.0 mm
+
+# row A: root, relative, scale, profile (knob r = 6.1)
 c1, c2, c3 = 14.0, 40.64, 67.28
-for x, n in zip((c1, c2, c3), ("ROOT", "SCALE", "PROFILE")):
-    add(text(n, x, 45.6, 2.3, FONT_BOLD, INK, spacing=0.06))
-add(text("names show in the display", W / 2, 60.2, 1.5, FONT_MED, SOFT))
-# relative switch between root and scale
-add(text("RELATIVE", 27.32, 47.0, 1.6, FONT_BOLD, INK))
-add(text("min / maj", 27.32, 57.2, 1.35, FONT_MED, SOFT))
+rowA, rowB, rowC = 52.0, 70.5, 87.0
+rule(44.8)
+for x, n in ((c1, "root"), (c2, "scale"), (c3, "profile")):
+    label(n, x, rowA + 8.6)
+label("relative", 27.32, rowA + 5.4, 1.7)
 
-rule(62.2)
+rule(62.6)
 
 # row B: focus, step, range
-add(text("FOCUS", c1, 64.9, 2.3, FONT_BOLD, GOLD, spacing=0.06))
-tick(c1, 70.5, 0.0, "flat", r0=8.0, r1=9.0)
-tick(c1, 70.5, 1 / 3, "1", r0=8.0, r1=9.0)
-tick(c1, 70.5, 1.0, "3", r0=8.0, r1=9.0)
-add(text("STEP", c2, 64.9, 2.3, FONT_BOLD, INK, spacing=0.06))
-tick(c2, 70.5, 0.0, "")
-tick(c2, 70.5, 1.0, "")
-add(text("leaps", c2 - 7.6, 77.6, 1.5, FONT_MED, SOFT))
-add(text("steps", c2 + 7.6, 77.6, 1.5, FONT_MED, SOFT))
-add(text("RANGE", c3, 64.9, 2.3, FONT_BOLD, INK, spacing=0.06))
+label("focus", c1, rowB + 8.8, 2.3, RED)
+tick(c1, rowB, 0.0, 6.9, 7.8)
+tick(c1, rowB, 1 / 3, 6.9, 7.8, "1")
+tick(c1, rowB, 1.0, 6.9, 7.8, "3")
+label("step", c2, rowB + 8.6)
+tick(c2, rowB, 0.0, 6.9, 7.8)
+tick(c2, rowB, 1.0, 6.9, 7.8)
+add(text("leaps", c2 - 9.4, rowB + 6.6, 1.35, FONT_MED, GREY))
+add(text("steps", c2 + 9.4, rowB + 6.6, 1.35, FONT_MED, GREY))
+label("range", c3, rowB + 8.6)
 for i in range(5):
-    if i != 2:  # the top tick would cross the RANGE label
-        tick(c3, 70.5, i / 4, str(i + 1) if i in (0, 4) else "")
+    if i != 2:  # the top tick would touch the rule above
+        tick(c3, rowB, i / 4, 6.9, 7.8, str(i + 1) if i in (0, 4) else "")
 
 # row C
-rowC = 87.0
-add(text("CV AMT", c1, 82.2, 1.75, FONT_BOLD, SOFT))
-for x, n in ((29.0, "LENGTH"), (41.5, "STRONG"), (54.0, "GRAVITY"), (64.0, "INVERT"), (74.0, "LEARN")):
-    add(text(n, x, 82.2, 1.75, FONT_BOLD, INK))
-add(text("accent cycle  (strong 0 = off)", 35.25, 93.6, 1.35, FONT_MED, SOFT))
+label("cv amt", c1, rowC + 5.6, 1.6, GREY)
+for x, n in ((29.0, "length"), (41.5, "strong"), (54.0, "gravity"), (64.0, "invert"), (74.0, "learn")):
+    label(n, x, rowC + 6.6 if n in ("length", "strong") else rowC + 5.6, 1.75)
 
-rule(95.6)
+rule(95.0)
 
 # inputs
-for i, n in enumerate(("CV", "TRIG", "ACCENT", "ROOT", "SCALE", "REL", "PROFILE", "FOCUS")):
-    add(text(n, IN_X0 + IN_DX * i, 98.4, 1.6, FONT_BOLD, INK if i < 3 else SOFT))
+for i, n in enumerate(("cv", "trig", "accent", "root", "scale", "rel", "profile", "focus")):
+    add(text(n, IN_X0 + IN_DX * i, 97.9, 1.5, FONT_MED if i >= 3 else FONT_BOLD, INK if i < 3 else GREY))
 
-# outputs
-add(f'<rect x="4.1" y="109.2" width="73.08" height="16.4" rx="1.2" fill="{OUTBOX}"/>')
-add(text("OCTAVE", OCT_X, 113.6, 1.75, FONT_BOLD, INK))
-tick(OCT_X, 119.0, 0.0, "", r0=4.4, r1=5.2)
-tick(OCT_X, 119.0, 1.0, "", r0=4.4, r1=5.2)
-add(text("-3", OCT_X - 6.2, 123.6, 1.4, FONT_BOLD, SOFT))
-add(text("+3", OCT_X + 6.2, 123.6, 1.4, FONT_BOLD, SOFT))
-for i, n in enumerate(("V/OCT", "TRIG", "DEGREE", "STABILITY")):
-    add(text(n, OUT_X0 + OUT_DX * i, 113.6, 1.75, FONT_BOLD, GOLD if i == 3 else INK))
+# outputs on a black strip
+add(f'<rect x="4.5" y="107.6" width="{W - 9.0}" height="15.2" rx="0.6" fill="{INK}"/>')
+add(text("octave \u00b13", OCT_X, 111.2, 1.6, FONT_BOLD, PAPER))
+for i, n in enumerate(("v/oct", "trig", "degree", "stability")):
+    add(text(n, OUT_X0 + OUT_DX * i, 111.2, 1.6, FONT_BOLD, RED if i == 3 else PAPER))
 
 svg = (
     f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}mm" height="{H}mm" '

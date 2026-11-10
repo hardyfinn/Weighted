@@ -14,11 +14,11 @@ listening experiments) or from the roles of tones in Javanese gamelan pathet.
 ## The display
 
 - **Top line:** root and scale on the left, profile on the right.
-- **Bars:** one per scale tone. The gold bar is that tone's weight right now
-  (Focus and Invert included). The thin orange line is its weight on accented
-  ("landing") notes. The teal mark is how often the tone actually came out in
+- **Bars:** one per scale tone. The white bar is that tone's weight right now
+  (Focus and Invert included); the note just played turns red. The thin red line is its weight on accented
+  ("landing") notes. The blue mark is how often the tone actually came out in
   the last 256 notes, so you can watch the output match the weights.
-- **Bottom line:** Focus value, Invert and mode on the left; the last note,
+- **Bottom line:** Focus value, Invert, mode, DRIFT and REL on the left; the last note,
   its weight and LAND (when it was an accented note) on the right. While
   learning it shows how many notes have been counted.
 - **Draw your own weights:** click a bar and drag up or down to set that
@@ -127,4 +127,4 @@ The panel is drawn by `res/make_panel.py` (needs `pip install fonttools`). The
 engine (`src/WeightedEngine.hpp`) has no Rack dependencies.
 `test/engine_test.cpp` checks it offline: output counts match the weights,
 contour is kept, Focus, Invert, landing weights, gamelan pathet and tunings,
-Gravity, Step, No-repeat, the User profile and Scala parsing.
+Gravity, Step (including that it keeps note counts equal to the weights and lets 7 step up to 1), No-repeat, the User profile, Scala parsing, relative keys and the circle-of-fifths Root knob.
