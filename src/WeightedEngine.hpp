@@ -176,9 +176,16 @@ struct Settings {
 	bool invert = false;     // rare notes become common
 	double landingBoost = 2.0;  // landing profile: top two weights multiplied by this
 	int gamelanTuning = 0;   // 0 = default/loaded table, 1 = snap to 12-TET
+	// HARM input: the current chord as pitch classes above the root (bit i =
+	// i semitones), its root and 3rd (-1 = none), and Pull (-1 to +1):
+	// chord tones are weighted x4^pull (noon = no effect).
+	int chordMask = 0;
+	int chordRoot = -1, chordThird = -1;
+	double pull = 0.0;
 	bool operator==(const Settings& o) const {
 		return root == o.root && scale == o.scale && profile == o.profile && std::fabs(focus - o.focus) < 1e-4 &&
-		       invert == o.invert && landingBoost == o.landingBoost && gamelanTuning == o.gamelanTuning;
+		       invert == o.invert && landingBoost == o.landingBoost && gamelanTuning == o.gamelanTuning &&
+		       chordMask == o.chordMask && chordRoot == o.chordRoot && chordThird == o.chordThird && pull == o.pull;
 	}
 	bool operator!=(const Settings& o) const { return !(*this == o); }
 };
@@ -192,7 +199,9 @@ struct Table {
 	double raw[12] = {};       // profile weight before Focus (normalised)
 	double w[12] = {};         // main weights (Focus applied, sum 1)
 	double land[12] = {};      // landing weights (sum 1)
-	double maxW = 1.0, maxLand = 1.0;
+	double cland[12] = {};     // first note after a chord change (sum 1)
+	int pc[12] = {};           // pitch class of each tone (semitones above root)
+	double maxW = 1.0, maxLand = 1.0, maxCland = 1.0;
 	std::string labels[12];
 };
 
@@ -308,6 +317,15 @@ inline void buildTable(Table& T, const Settings& st, const std::vector<UserPoint
 	for (int k = 0; k < T.n; k++) T.w[k] = std::pow(base[k], f);
 	normalise(T.w, T.n);
 
+	// HARM: the current chord's tones get heavier (Pull > 0) or lighter (< 0).
+	for (int k = 0; k < T.n; k++) T.pc[k] = (int) (((std::lround(T.nominal[k] / 100.0)) % 12 + 12) % 12);
+	if (st.chordMask && st.pull != 0.0) {
+		double m = std::pow(4.0, std::max(-1.0, std::min(1.0, st.pull)));
+		for (int k = 0; k < T.n; k++)
+			if (st.chordMask & (1 << T.pc[k])) T.w[k] *= m;
+		normalise(T.w, T.n);
+	}
+
 	// Landing profile: the two strongest tones are boosted.
 	int order[12];
 	for (int k = 0; k < T.n; k++) order[k] = k;
@@ -315,8 +333,37 @@ inline void buildTable(Table& T, const Settings& st, const std::vector<UserPoint
 	for (int k = 0; k < T.n; k++) T.land[k] = T.w[k];
 	for (int j = 0; j < std::min(2, T.n); j++) T.land[order[j]] *= st.landingBoost;
 	normalise(T.land, T.n);
-	T.maxW = T.maxLand = 0.0;
-	for (int k = 0; k < T.n; k++) { T.maxW = std::max(T.maxW, T.w[k]); T.maxLand = std::max(T.maxLand, T.land[k]); }
+	// After a chord change: the chord's root and 3rd boosted (only with Pull > 0).
+	for (int k = 0; k < T.n; k++) T.cland[k] = T.w[k];
+	if (st.chordMask && st.pull > 0.0) {
+		double b = 1.0 + 3.0 * std::min(1.0, st.pull);
+		for (int k = 0; k < T.n; k++)
+			if (T.pc[k] == st.chordRoot || T.pc[k] == st.chordThird) T.cland[k] *= b;
+		normalise(T.cland, T.n);
+	}
+	T.maxW = T.maxLand = T.maxCland = 0.0;
+	for (int k = 0; k < T.n; k++) {
+		T.maxW = std::max(T.maxW, T.w[k]);
+		T.maxLand = std::max(T.maxLand, T.land[k]);
+		T.maxCland = std::max(T.maxCland, T.cland[k]);
+	}
+}
+
+// HARM chord from V/Oct voltages: pitch classes above `root` (semitones).
+// The first voltage is taken as the chord's root; its 3rd is the tone a minor
+// or major third above it, if the chord has one.
+inline void chordFromVolts(const float* v, int n, int root, int& mask, int& chordRoot, int& chordThird) {
+	mask = 0;
+	chordRoot = chordThird = -1;
+	for (int i = 0; i < n; i++) {
+		int pc = (int) (((std::lround(v[i] * 12.0) - root) % 12 + 12) % 12);
+		mask |= 1 << pc;
+		if (i == 0) chordRoot = pc;
+	}
+	if (chordRoot >= 0) {
+		if (mask & (1 << ((chordRoot + 4) % 12))) chordThird = (chordRoot + 4) % 12;
+		else if (mask & (1 << ((chordRoot + 3) % 12))) chordThird = (chordRoot + 3) % 12;
+	}
 }
 
 // A chosen note: octave (relative to the root's octave) and tone index.
@@ -505,6 +552,20 @@ inline Note addSteps(const Table& T, const Note& n, int steps) {
 	r.oct = (int) std::floor((double) i / T.n);
 	r.k = i - r.oct * T.n;
 	return r;
+}
+
+// Move up by `count` chord tones: the next scale notes above n whose pitch
+// class is in the chord. Falls back to scale thirds if the scale has none.
+inline Note addChordTones(const Table& T, const Note& n, int count, int mask) {
+	if (count <= 0) return n;
+	Note c = n;
+	int found = 0;
+	for (int i = 0; i < 3 * T.n; i++) {
+		c = addSteps(T, c, 1);
+		if (mask & (1 << T.pc[c.k]))
+			if (++found == count) return c;
+	}
+	return addSteps(T, n, 2 * count);
 }
 
 inline int strongestIndex(const double* w, int n) {
