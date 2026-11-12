@@ -5,4 +5,5 @@ Plugin* pluginInstance;
 void init(Plugin* p) {
 	pluginInstance = p;
 	p->addModel(modelWeighted);
+	p->addModel(modelChanges);
 }

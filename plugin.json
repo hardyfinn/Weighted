@@ -1,7 +1,7 @@
 {
   "slug": "Weighted",
   "name": "Weighted",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "license": "GPL-3.0-or-later",
   "brand": "Haer",
   "author": "Haer",
@@ -17,7 +17,21 @@
       "slug": "Weighted",
       "name": "Weighted",
       "description": "Weighted quantizer: random CV in, notes out, with strong scale degrees chosen more often. Profiles from music research and gamelan pathet, with Focus, accents, step preference and slendro/pelog tunings",
-      "tags": ["Quantizer", "Random", "Polyphonic"]
+      "tags": [
+        "Quantizer",
+        "Random",
+        "Polyphonic"
+      ]
+    },
+    {
+      "slug": "TheChanges",
+      "name": "The Changes",
+      "description": "Chord sequencer: picks the next chord the way the chosen style plays it, with the style's usual extensions, voice-led. Leads Weighted over the HARM cable and follows Long Form over LINK",
+      "tags": [
+        "Sequencer",
+        "Polyphonic",
+        "Random"
+      ]
     }
   ]
 }
