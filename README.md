@@ -108,6 +108,51 @@ profile works on any scale: weights are matched by pitch.
 - Load a Scala tuning (.scl): 5 notes per octave replaces slendro, 7 replaces pelog
 - Clear the User profile
 
+## The Changes
+
+The second module in this plugin (28 HP). A chord sequencer that picks the
+next chord the way a player of the chosen style would, with that style's
+usual extensions, and voice-leads it. Patch its **HARM** output into
+Weighted's **HARM** input and Weighted's melody follows the chords.
+
+![The Changes](the-changes-preview.png)
+
+| Control | What it does |
+|---|---|
+| Display | The chord now (name, Roman numeral, key), the next chord, and the loop. An amber dot marks a chord DRIFT rewrote. Click a chord to roll it again; right-click to choose one from the style's list |
+| **Style** | Weighted's profile list: Flat, Fit, Folk, Classical, Downbeat, Rock, Detroit, House, Gospel, Funk, Soul, Reggae, Pathet 1-3 (a drone on the pathet's main tones) |
+| **Key** | Circle of fifths, like Weighted's Root |
+| **Mode** | Style (each style's home key, default), major, minor, Dorian, Mixolydian |
+| **Rate** | Bars per chord when clocked: 1/2, 1, 2, 4, 8 |
+| **Loop** | Off (a new chord every time), 2, 4 or 8 chords |
+| **Focus** + CV | 0 = any chord in the key, 1 = the style as written, 3 = only its favourite moves |
+| **Colour** + CV | How far up the chord goes: triad, 7th, 9th, 11th, 13th, within what the style uses (a reggae I stays a triad) |
+| **Spread** + CV | Close voicing to drop-2 to wide |
+| **Drift** + CV | Chance that one chord of the loop (never the first) is rewritten after each pass |
+| **Hold** (button and gate) | Stay on this chord |
+| **New** | A fresh loop on the next bar line |
+| **Lock** | No drift edits |
+
+Styles at a glance: Folk I IV V vi with sus and add9; Classical home, away,
+dominant, home, with 7ths on V and ii and inversions in the bass; Rock I bVII
+IV and power chords at low Colour; Detroit two-chord minor vamps with m9 and
+m11; House i bVI bVII and i iv with m9 and maj9; Gospel ii V I, IV #iv dim7 I
+and secondary dominants with 9ths and 13ths; Funk a dominant 9 or 13 vamp
+stepping to IV7; Soul maj7 and m9 with ii V; Reggae plain triads.
+
+**Inputs:** CLOCK (16ths; right-click for 24 PPQN, 8ths or quarters), RESET,
+CHANGE (next chord now, or on the next beat), HOLD, TRANSP (1 V/oct, rounded),
+LINK (from Long Form: changes on its bar lines, keeps a separate loop for each
+section, and Long Form's energy adds Colour and tension). With no clock, only
+CHANGE moves on.
+
+**Outputs:** CHORD (poly, Voices: Auto by style or 3-6), BASS (C2-B2), ROOT,
+TOP (highest voice), GATE (with a 5 ms gap at each change), CHANGE, TENSION
+(0-10 V: home 0 V, dominants and passing chords high), HARM (to Weighted).
+
+Right-click: voices, bass inversions, clock rate, Change timing, what Long Form
+energy drives, restore this loop (undo drift), new loops for every section.
+
 ## Gamelan tunings
 
 Every gamelan set is tuned differently, so the defaults are only rough guides:
@@ -123,8 +168,9 @@ push to main (see `.github/workflows/build.yml`). The `.vcvplugin` file appears
 on this repository's **latest** release page. To build locally, download the
 Rack SDK and run `make dist RACK_DIR=/path/to/Rack-SDK`.
 
-The panel is drawn by `res/make_panel.py` (needs `pip install fonttools`). The
+The panels are drawn by `res/make_panel.py` and `res/make_changes_panel.py` (needs `pip install fonttools`). The
 engine (`src/WeightedEngine.hpp`) has no Rack dependencies.
 `test/engine_test.cpp` checks it offline: output counts match the weights,
 contour is kept, Focus, Invert, landing weights, gamelan pathet and tunings,
 Gravity, Step (including that it keeps note counts equal to the weights and lets 7 step up to 1), No-repeat, the User profile, Scala parsing, relative keys and the circle-of-fifths Root knob.
+`test/changes_test.cpp` checks The Changes' engine: every style, mode and colour, chord names, Focus, loops, drift and voice leading.
