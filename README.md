@@ -43,7 +43,8 @@ listening experiments) or from the roles of tones in Javanese gamelan pathet.
 | **Gravity** | Off = **Bins** mode: the whole CV range is re-weighted (higher CV still gives a higher note, so the contour survives). On = **Gravity** mode: CV is read as pitch, quantized to the nearest note, then sometimes pulled to a stronger note within 3 semitones. Focus sets how often (always at Focus 2 and above) |
 | **Invert** | Flips the hierarchy: rare notes become common |
 | **Octave** | -3 to +3 octaves on V/Oct. The last change before the pitch leaves the module (after root, range and chord) |
-| **Mod A, Mod B** | Two assignable CV inputs. Each has an **amt** knob (attenuverter, default 100%) and a **dest** button that steps through Root, Scale, Rel, Profile and Focus. The display's top line shows where each goes (bright when patched). Both on the same destination add together. Also settable from the right-click menu |
+| **Mod A, Mod B** | Two assignable CV inputs. Each has an **amt** knob (attenuverter, default 100%) and a **dest** button that steps through Root, Scale, Rel, Profile, Focus and Pull. The display's top line shows where each goes (bright when patched). Both on the same destination add together. Also settable from the right-click menu |
+| **Pull** | How much the chord at **Harm** in counts (attenuverter, default +50%). Right of noon: the chord's notes are chosen more often, up to 4 times as often at full, so the melody sits on the harmony. Noon: no effect. Left of noon: the chord's notes become rarer (a quarter as often at full), so the melody favours the notes between them for a tense, floating sound. With Harm unpatched it does nothing |
 | **Learn** | Press, play some notes into CV in (with Trig patched, or by moving the CV), press again. At least 8 notes. The counts become the User profile and Profile switches to User |
 
 ## Profiles
@@ -77,6 +78,7 @@ profile works on any scale: weights are matched by pitch.
 | **Trig** in | Takes a new note on each trigger. Unpatched: follows CV continuously |
 | **Accent** in | High (above 1 V) when a note is taken = use the landing weights (the two strongest tones boosted) |
 | **Mod A**, **Mod B** in | Assignable (see above). As Root: 1 V/oct, rounded to semitones, added to the Root knob. As Scale or Profile: 10 V sweeps the whole list. As Rel: a gate, high (above 1 V) flips the Relative switch, so a sequencer can change the mood per section. As Focus: 10 V moves Focus across its whole range. Patches from before 2.4.0 load with Mod A on Root and Mod B on Scale (where those jacks were); cables in the old Profile, Focus and Rel jacks need re-patching |
+| **Harm** in | A chord to lean on (polyphonic, 1 V/oct). Any poly chord works, with channel 1 as the chord's root: up to 6 notes are read. Pull sets how much it counts, the chord's notes show an amber line under their bars, and the light by the jack glows. When the chord changes (and Pull is above noon), the next note lands on the new chord's root or 3rd: the light flashes bright. With **Chord on V/Oct** on, the added notes are the chord's own (next chord tone up, and the one after) instead of scale thirds. From the Changes module, the cable (10 or more channels) also sets Weighted's key, mode and profile, shown as HARM in the display's top line (right-click to keep your own knobs instead). Channel layout: 1-6 chord notes (1 = root), 7 how many of them (1 V each), 8 key root (1/12 V per semitone above C), 9 mode (0 V major, 1 V minor, 2 V Dorian, 3 V Mixolydian), 10 profile (0.5 V per profile, in the Profile knob's order), 11 chord-change trigger |
 | **V/Oct** out | The note. With Root on C and Octave at 0, the root's middle octave is at 0 V (C4) |
 | **Trig** out | A 1 ms trigger for each new note (right-click: only when the pitch changes) |
 | **Degree** out | Which scale tone was chosen, 1 V per step, first tone = 0 V |
@@ -101,6 +103,7 @@ profile works on any scale: weights are matched by pitch.
   3rd and 5th, or the 5th above each note, counted in scale steps, so chords
   always stay in the scale. Patch V/Oct to a polyphonic voice. With
   polyphonic CV in, channels are limited so the total stays at 16
+- **HARM input:** key, mode and profile follow the Changes cable (default), or keep your own knobs
 - Gamelan tuning: the slendro/pelog tuning (default or loaded), or snap to 12-TET
 - Load a Scala tuning (.scl): 5 notes per octave replaces slendro, 7 replaces pelog
 - Clear the User profile

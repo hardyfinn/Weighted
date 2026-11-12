@@ -32,6 +32,7 @@ struct Weighted : Module {
 		MODB_AMT_PARAM,
 		MODA_DEST_PARAM,
 		MODB_DEST_PARAM,
+		PULL_PARAM,
 		PARAMS_LEN
 	};
 	enum InputId {
@@ -42,6 +43,7 @@ struct Weighted : Module {
 		// jacks, so those cables land on Mod A and Mod B in old patches.
 		MODA_INPUT,
 		MODB_INPUT,
+		HARM_INPUT,
 		INPUTS_LEN
 	};
 	enum OutputId {
@@ -57,6 +59,7 @@ struct Weighted : Module {
 		LEARN_LIGHT,
 		ACCENT_LIGHT,
 		RELATIVE_LIGHT,
+		HARM_LIGHT,
 		LIGHTS_LEN
 	};
 
@@ -70,10 +73,17 @@ struct Weighted : Module {
 	int driftSetting = 0;    // 0 off, 1 slow, 2 medium, 3 fast
 	int chordSetting = 0;    // 0 off, 1 add 3rd, 2 add 3rd and 5th, 3 add 5th
 	// Mod A / Mod B destinations
-	enum ModDest { DEST_ROOT, DEST_SCALE, DEST_REL, DEST_PROFILE, DEST_FOCUS, NUM_DEST };
+	enum ModDest { DEST_ROOT, DEST_SCALE, DEST_REL, DEST_PROFILE, DEST_FOCUS, DEST_PULL, NUM_DEST };
 	int modDest[2] = {DEST_FOCUS, DEST_ROOT};
 	dsp::BooleanTrigger destButton[2];
 	int relativeTiming = 0;  // 0 = Relative changes at once, 1 = at the end of the accent cycle
+	// HARM input (a chord, or the Changes cable)
+	int harmKeepKey = 0;     // 0 = key, mode and profile follow HARM (Changes cable), 1 = keep the knobs
+	dsp::SchmittTrigger harmTrig;
+	int harmLastMask = 0;
+	bool harmOn = false, harmKeyOn = false;  // for the display
+	int harmMask = 0;
+	float pullShown = 0.f;
 	bool relativeApplied = false;
 	bool relativeShown = false, relativePending = false;  // for the display
 
@@ -110,7 +120,7 @@ struct Weighted : Module {
 	int tableVersion = -1;   // bumps when user or tunings change
 	int builtVersion = -2;
 	Table table;
-	StepCache stepCacheW, stepCacheLand;  // Step balancing for the main and landing weights
+	StepCache stepCacheW, stepCacheLand, stepCacheCland;  // Step balancing for the main, landing and chord-landing weights
 	int lastRoot = 0;
 
 	struct Channel {
@@ -118,6 +128,8 @@ struct Weighted : Module {
 		dsp::PulseGenerator pulse;
 		Note last;
 		bool hasLast = false;
+		bool landChord = false;  // the next note lands on the new chord
+		int table = 0;           // weights used for the last note: 0 main, 1 landing, 2 chord landing
 		Note gravityNearest;
 		bool hasGravity = false;
 		int counter = -1;
@@ -151,8 +163,9 @@ struct Weighted : Module {
 		configParam(FOCUS_ATT_PARAM, -1.f, 1.f, 0.f, "Unused");
 		configParam(MODA_AMT_PARAM, -1.f, 1.f, 1.f, "Mod A amount", "%", 0.f, 100.f);
 		configParam(MODB_AMT_PARAM, -1.f, 1.f, 1.f, "Mod B amount", "%", 0.f, 100.f);
-		configButton(MODA_DEST_PARAM, "Mod A destination (press to step: root, scale, rel, profile, focus)");
-		configButton(MODB_DEST_PARAM, "Mod B destination (press to step: root, scale, rel, profile, focus)");
+		configButton(MODA_DEST_PARAM, "Mod A destination (press to step: root, scale, rel, profile, focus, pull)");
+		configButton(MODB_DEST_PARAM, "Mod B destination (press to step: root, scale, rel, profile, focus, pull)");
+		configParam(PULL_PARAM, -1.f, 1.f, 0.5f, "Pull (how much the HARM chord counts: right = chord tones more often, left = less often, noon = no effect)", "%", 0.f, 100.f);
 		configParam(STEP_PARAM, 0.f, 1.f, 0.f, "Step (prefer small intervals)", "%", 0.f, 100.f);
 		configParam(RANGE_PARAM, 1.f, 5.f, 2.f, "Range", " octaves");
 		paramQuantities[RANGE_PARAM]->snapEnabled = true;
@@ -173,6 +186,7 @@ struct Weighted : Module {
 		configInput(ACCENT_INPUT, "Accent (high = use the landing profile)");
 		configInput(MODA_INPUT, "Mod A (destination shown in the display)");
 		configInput(MODB_INPUT, "Mod B (destination shown in the display)");
+		configInput(HARM_INPUT, "Harm (a poly chord, 1 V/oct, first channel = chord root; or the Changes cable, which also sets key, mode and profile)");
 		configOutput(VOCT_OUTPUT, "Pitch (1 V/oct, root at 0 V = C4 when Root is C)");
 		configOutput(TRIG_OUTPUT, "Trigger on each new note");
 		configOutput(DEGREE_OUTPUT, "Scale degree (1 V per scale step, first tone = 0 V)");
@@ -192,6 +206,7 @@ struct Weighted : Module {
 		driftSetting = 0;
 		chordSetting = 0;
 		relativeTiming = 0;
+		harmKeepKey = 0;
 		modDest[0] = DEST_FOCUS;
 		modDest[1] = DEST_ROOT;
 		haveSlendro = havePelog = false;
@@ -214,7 +229,7 @@ struct Weighted : Module {
 	}
 
 	static const char* destName(int d) {
-		static const char* n[NUM_DEST] = {"ROOT", "SCALE", "REL", "PROFILE", "FOCUS"};
+		static const char* n[NUM_DEST] = {"ROOT", "SCALE", "REL", "PROFILE", "FOCUS", "PULL"};
 		return n[clamp(d, 0, NUM_DEST - 1)];
 	}
 
@@ -257,11 +272,27 @@ struct Weighted : Module {
 			modOn[d] = true;
 		}
 
+		// ---- HARM: a poly chord. The Changes cable (10 or more channels) also
+		// carries the key (ch 8), mode (ch 9), profile (ch 10) and a chord-change
+		// trigger (ch 11); ch 7 says how many of channels 1-6 are chord tones.
+		bool harm = inputs[HARM_INPUT].isConnected();
+		int hc = harm ? inputs[HARM_INPUT].getChannels() : 0;
+		bool harmKey = harm && hc >= 10 && harmKeepKey == 0;
 		Settings s;
 		int rootCv = modOn[DEST_ROOT] ? (int) std::round(mod[DEST_ROOT] * 12.f) : 0;
-		s.root = fifthsToSemitone((int) params[ROOT_PARAM].getValue()) + rootCv;
-		s.scale = cvIndex(SCALE_PARAM, mod[DEST_SCALE], NUM_SCALES);
-		s.profile = cvIndex(PROFILE_PARAM, mod[DEST_PROFILE], NUM_PROFILES);
+		if (harmKey) {
+			static const int modeScale[4] = {0, 1, 2, 5};  // major, minor, Dorian, Mixolydian
+			int mode = clamp((int) std::round(inputs[HARM_INPUT].getVoltage(8)), 0, 3);
+			int prof = clamp((int) std::round(inputs[HARM_INPUT].getVoltage(9) * 2.f), 0, NUM_PROFILES - 1);
+			s.root = (((int) std::round(inputs[HARM_INPUT].getVoltage(7) * 12.f)) % 12 + 12) % 12 + rootCv;
+			s.scale = clamp(modeScale[mode] + (int) std::round(mod[DEST_SCALE] / 10.f * NUM_SCALES), 0, NUM_SCALES - 1);
+			s.profile = clamp(prof + (int) std::round(mod[DEST_PROFILE] / 10.f * NUM_PROFILES), 0, NUM_PROFILES - 1);
+		}
+		else {
+			s.root = fifthsToSemitone((int) params[ROOT_PARAM].getValue()) + rootCv;
+			s.scale = cvIndex(SCALE_PARAM, mod[DEST_SCALE], NUM_SCALES);
+			s.profile = cvIndex(PROFILE_PARAM, mod[DEST_PROFILE], NUM_PROFILES);
+		}
 		// Relative: the gate flips the switch, so a sequencer can move in and out.
 		bool relative = params[RELATIVE_PARAM].getValue() > 0.5f;
 		if (modOn[DEST_REL]) relative = relative != (mod[DEST_REL] >= 1.f);
@@ -284,6 +315,26 @@ struct Weighted : Module {
 		static const double boosts[3] = {1.5, 2.0, 3.0};
 		s.landingBoost = boosts[clamp(boostSetting, 0, 2)];
 		s.gamelanTuning = gamelanTuning;
+		// HARM chord, as pitch classes above the (final) root
+		float pull = clamp(params[PULL_PARAM].getValue() + mod[DEST_PULL] / 5.f, -1.f, 1.f);
+		pullShown = pull;
+		bool chordChanged = false;
+		if (harm) {
+			int nt = hc >= 7 ? clamp((int) std::round(inputs[HARM_INPUT].getVoltage(6)), 1, 6) : std::min(hc, 6);
+			float v[6];
+			for (int i = 0; i < nt; i++) v[i] = inputs[HARM_INPUT].getVoltage(i);
+			chordFromVolts(v, nt, s.root, s.chordMask, s.chordRoot, s.chordThird);
+			s.pull = std::round(pull * 100.f) / 100.0;  // steps of 1%, so a CV doesn't rebuild every sample
+			bool trig = hc >= 11 && harmTrig.process(inputs[HARM_INPUT].getVoltage(10), 0.1f, 1.f);
+			chordChanged = trig || s.chordMask != harmLastMask;
+			harmLastMask = s.chordMask;
+		}
+		else harmLastMask = 0;
+		if (chordChanged)
+			for (int c = 0; c < 16; c++) ch[c].landChord = true;
+		harmOn = harm;
+		harmKeyOn = harmKey;
+		harmMask = s.chordMask;
 		// Root only shifts the output, so it doesn't need a rebuild.
 		Settings key = s;
 		key.root = 0;
@@ -367,7 +418,11 @@ struct Weighted : Module {
 				if (triggered) C.counter = (C.counter + 1) % std::max(1, len);
 				if (inputs[ACCENT_INPUT].isConnected()) accent = inputs[ACCENT_INPUT].getPolyVoltage(c) >= 1.f;
 				else accent = triggered && strong > 0 && C.counter == (strong - 1) % std::max(1, len);
-				const double* w = accent ? table.land : table.w;
+				// The first note after a chord change lands on its root or 3rd.
+				bool landChord = C.landChord && harm && settings.pull > 0.0 && settings.chordMask;
+				C.landChord = false;
+				int tsel = landChord ? 2 : (accent ? 1 : 0);
+				const double* w = tsel == 2 ? table.cland : (tsel == 1 ? table.land : table.w);
 
 				Note n;
 				if (!gravity) {
@@ -383,7 +438,7 @@ struct Weighted : Module {
 					else u = (v - lo) / (hi - lo);
 					bool useHistory = triggered && C.hasLast;
 					n = pickBins(table, w, u, range, lowOct, useHistory ? &C.last : nullptr, triggered ? step : 0.0,
-					             triggered ? noRepeat : 0.0, accent ? &stepCacheLand : &stepCacheW);
+					             triggered ? noRepeat : 0.0, tsel == 2 ? &stepCacheCland : (tsel == 1 ? &stepCacheLand : &stepCacheW));
 				}
 				else {
 					double cents = (v - rootVolts) * 1200.0;
@@ -428,12 +483,17 @@ struct Weighted : Module {
 				C.last = n;
 				C.hasLast = true;
 				C.accent = accent;
+				C.table = tsel;
 			}
-			const double* w = C.accent ? table.land : table.w;
-			double mx = C.accent ? table.maxLand : table.maxW;
+			const double* w = C.table == 2 ? table.cland : (C.table == 1 ? table.land : table.w);
+			double mx = C.table == 2 ? table.maxCland : (C.table == 1 ? table.maxLand : table.maxW);
 			float trigV = C.pulse.process(args.sampleTime) ? 10.f : 0.f;
+			// With a HARM chord, the Chord menu stacks the chord's own tones
+			// (next chord tone up = "3rd", the one after = "5th").
+			bool chordStack = harm && settings.chordMask != 0;
 			for (int j = 0; j < voices; j++) {
-				Note cn = addSteps(table, C.last, chordSteps[clamp(chordSetting, 0, 3)][j]);
+				int st = chordSteps[clamp(chordSetting, 0, 3)][j];
+				Note cn = chordStack ? addChordTones(table, C.last, st / 2, settings.chordMask) : addSteps(table, C.last, st);
 				outputs[VOCT_OUTPUT].setVoltage(rootVolts + noteCents(table, cn) / 1200.0 + octaveVolts, c * voices + j);
 				outputs[TRIG_OUTPUT].setVoltage(trigV, c * voices + j);
 			}
@@ -452,6 +512,7 @@ struct Weighted : Module {
 		if (relativeWaiting) lights[RELATIVE_LIGHT].setBrightness(std::fmod(args.frame * args.sampleTime, 0.25f) < 0.125f ? 1.f : 0.f);
 		else lights[RELATIVE_LIGHT].setBrightness(relative ? (relativeActive ? 1.f : 0.25f) : 0.f);
 		lights[ACCENT_LIGHT].setBrightnessSmooth(ch[0].accent ? 1.f : 0.f, args.sampleTime);
+		lights[HARM_LIGHT].setBrightnessSmooth(harm ? (ch[0].table == 2 ? 1.f : 0.35f) : 0.f, args.sampleTime);
 	}
 
 	// ---- Scala loading
@@ -492,6 +553,7 @@ struct Weighted : Module {
 		json_object_set_new(r, "drift", json_integer(driftSetting));
 		json_object_set_new(r, "chord", json_integer(chordSetting));
 		json_object_set_new(r, "relativeTiming", json_integer(relativeTiming));
+		json_object_set_new(r, "harmKeepKey", json_integer(harmKeepKey));
 		json_object_set_new(r, "modA", json_integer(modDest[0]));
 		json_object_set_new(r, "modB", json_integer(modDest[1]));
 		if (haveSlendro) {
@@ -540,6 +602,7 @@ struct Weighted : Module {
 		geti("drift", driftSetting);
 		geti("chord", chordSetting);
 		geti("relativeTiming", relativeTiming);
+		geti("harmKeepKey", harmKeepKey);
 		// Before 2.4.0 Root and Scale had their own jacks, which are now Mod A and B.
 		if (!json_object_get(r, "modA")) {
 			modDest[0] = DEST_ROOT;
@@ -582,6 +645,7 @@ static const NVGcolor C_BAR = nvgRGB(0xEC, 0xE8, 0xDF);
 static const NVGcolor C_LAND = nvgRGB(0xD7, 0x36, 0x2B);
 static const NVGcolor C_HIT = nvgRGB(0x7F, 0xA8, 0xC9);
 static const NVGcolor C_PLAYED = nvgRGB(0xD7, 0x36, 0x2B);
+static const NVGcolor C_CHORD = nvgRGB(0xE8, 0xB0, 0x40);
 
 struct WeightDisplay : Widget {
 	Weighted* module = nullptr;
@@ -719,6 +783,9 @@ struct WeightDisplay : Widget {
 				rect(args, x + bw * 0.3f, bottom - hs - 1.0f, bw * 0.4f, 2.0f, C_HIT);
 			}
 			text(args, x + bw / 2, bottom + fsSmall * 0.9f, T.labels[k], hit ? C_PLAYED : C_SOFT, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE, fsSmall);
+			// HARM chord tones: an amber line under the bar
+			if (m->harmOn && (m->harmMask & (1 << T.pc[k])))
+				rect(args, x + bw * 0.18f, bottom + 0.5f, bw * 0.64f, 1.5f, C_CHORD);
 		}
 
 		// bottom line
@@ -726,14 +793,18 @@ struct WeightDisplay : Widget {
 		std::string left;
 		if (m->learning) left = string::f("LEARNING  %d notes", m->learnTotal);
 		else if (drawing) left = "DRAWING USER WEIGHTS";
-		else left = string::f("FOCUS %.2f%s  %s%s%s", m->settings.focus, m->settings.invert ? " INV" : "",
+		else left = string::f("FOCUS %.2f%s  %s%s%s%s", m->settings.focus, m->settings.invert ? " INV" : "",
 		                      m->params[Weighted::GRAVITY_PARAM].getValue() > 0.5f ? "GRAVITY" : "BINS",
 		                      m->driftSetting > 0 ? "  DRIFT" : "",
-		                      m->relativePending ? "  REL.." : (m->relativeShown ? "  REL" : ""));
+		                      m->relativePending ? "  REL.." : (m->relativeShown ? "  REL" : ""),
+		                      m->harmOn ? string::f("  HARM %+d%%", (int) std::round(m->pullShown * 100.f)).c_str() : "");
 		text(args, pad, by, left, m->learning ? C_LAND : C_SOFT, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE, fsSmall);
 		if (m->lastK >= 0 && m->lastK < n)
 			text(args, W - pad, by, string::f("%s%s  %2.0f%%", m->lastAccent ? "LAND " : "", T.labels[m->lastK].c_str(), 100.0 * T.w[m->lastK]),
 			     m->lastAccent ? C_LAND : C_INK, NVG_ALIGN_RIGHT | NVG_ALIGN_BASELINE, fsSmall);
+		// Key, mode and profile from the Changes cable: marked in the top line
+		if (m->harmKeyOn)
+			text(args, W * 0.38f, ty, "HARM", C_CHORD, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE, fs);
 	}
 };
 
@@ -768,11 +839,17 @@ struct WeightedWidget : ModuleWidget {
 		addParam(createParamCentered<Davies1900hWhiteKnob>(mm2px(Vec(col[2], rowB)), module, Weighted::RANGE_PARAM));
 		addParam(createLightParamCentered<VCVLightBezel<YellowLight>>(mm2px(Vec(col[3], rowB)), module, Weighted::LEARN_PARAM, Weighted::LEARN_LIGHT));
 
-		addParam(createParamCentered<BefacoTinyKnob>(mm2px(Vec(col[0], rowC)), module, Weighted::LENGTH_PARAM));
-		addParam(createParamCentered<BefacoTinyKnob>(mm2px(Vec(col[1], rowC)), module, Weighted::STRONG_PARAM));
-		addChild(createLightCentered<SmallLight<RedLight>>(mm2px(Vec(col[1] + 5.6f, rowC - 4.0f)), module, Weighted::ACCENT_LIGHT));
-		addParam(createLightParamCentered<VCVLightLatch<MediumSimpleLight<WhiteLight>>>(mm2px(Vec(col[2], rowC)), module, Weighted::GRAVITY_PARAM, Weighted::GRAVITY_LIGHT));
-		addParam(createLightParamCentered<VCVLightLatch<MediumSimpleLight<WhiteLight>>>(mm2px(Vec(col[3], rowC)), module, Weighted::INVERT_PARAM, Weighted::INVERT_LIGHT));
+		// Row C: six columns (length, strong, gravity, invert, then HARM in and Pull)
+		float c6[6];
+		for (int i = 0; i < 6; i++) c6[i] = 9.6f + 16.48f * i;
+		addParam(createParamCentered<BefacoTinyKnob>(mm2px(Vec(c6[0], rowC)), module, Weighted::LENGTH_PARAM));
+		addParam(createParamCentered<BefacoTinyKnob>(mm2px(Vec(c6[1], rowC)), module, Weighted::STRONG_PARAM));
+		addChild(createLightCentered<SmallLight<RedLight>>(mm2px(Vec(c6[1] + 5.6f, rowC - 4.0f)), module, Weighted::ACCENT_LIGHT));
+		addParam(createLightParamCentered<VCVLightLatch<MediumSimpleLight<WhiteLight>>>(mm2px(Vec(c6[2], rowC)), module, Weighted::GRAVITY_PARAM, Weighted::GRAVITY_LIGHT));
+		addParam(createLightParamCentered<VCVLightLatch<MediumSimpleLight<WhiteLight>>>(mm2px(Vec(c6[3], rowC)), module, Weighted::INVERT_PARAM, Weighted::INVERT_LIGHT));
+		addInput(createInputCentered<PJ301MPort>(mm2px(Vec(c6[4], rowC)), module, Weighted::HARM_INPUT));
+		addChild(createLightCentered<SmallLight<YellowLight>>(mm2px(Vec(c6[4] + 5.4f, rowC - 4.0f)), module, Weighted::HARM_LIGHT));
+		addParam(createParamCentered<BefacoTinyKnob>(mm2px(Vec(c6[5], rowC)), module, Weighted::PULL_PARAM));
 
 		addInput(createInputCentered<PJ301MPort>(mm2px(Vec(7.6, rowIn)), module, Weighted::CV_INPUT));
 		addInput(createInputCentered<PJ301MPort>(mm2px(Vec(19.9, rowIn)), module, Weighted::TRIG_INPUT));
@@ -804,12 +881,17 @@ struct WeightedWidget : ModuleWidget {
 			{"Off", "Lands on the first scale tone (root)", "Lands on the strongest tone"}, &m->phraseEnd));
 		menu->addChild(createIndexPtrSubmenuItem("Drift (weights wander on their own)",
 			{"Off", "Slow (about a minute)", "Medium (about 20 s)", "Fast (about 5 s)"}, &m->driftSetting));
-		menu->addChild(createIndexPtrSubmenuItem("Mod A destination", {"Root", "Scale", "Rel", "Profile", "Focus"}, &m->modDest[0]));
-		menu->addChild(createIndexPtrSubmenuItem("Mod B destination", {"Root", "Scale", "Rel", "Profile", "Focus"}, &m->modDest[1]));
+		menu->addChild(createIndexPtrSubmenuItem("Mod A destination", {"Root", "Scale", "Rel", "Profile", "Focus", "Pull"}, &m->modDest[0]));
+		menu->addChild(createIndexPtrSubmenuItem("Mod B destination", {"Root", "Scale", "Rel", "Profile", "Focus", "Pull"}, &m->modDest[1]));
 		menu->addChild(createIndexPtrSubmenuItem("Relative changes",
 			{"At once", "At the end of the accent cycle (with Trig patched)"}, &m->relativeTiming));
 		menu->addChild(createIndexPtrSubmenuItem("Chord on V/Oct (polyphonic)",
 			{"Off (single note)", "Add the 3rd above (in the scale)", "Add the 3rd and 5th", "Add the 5th"}, &m->chordSetting));
+
+		menu->addChild(new MenuSeparator);
+		menu->addChild(createMenuLabel("HARM input"));
+		menu->addChild(createIndexPtrSubmenuItem("Key, mode and profile (from the Changes cable)",
+			{"Follow HARM", "Keep my own knobs"}, &m->harmKeepKey));
 
 		menu->addChild(new MenuSeparator);
 		menu->addChild(createMenuLabel("Gamelan tuning"));

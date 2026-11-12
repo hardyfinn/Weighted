@@ -52,8 +52,14 @@ add(text("range", col[2], rowB + 10.3, L))
 for i in (0, 1, 3, 4): tick(col[2], rowB, i / 4, 6.9, 7.8)
 add(text("learn", col[3], rowB + 10.3, L))
 c5 = [12.7 + 19.05 * i for i in range(5)]
-for x, n in zip(col, ("length", "strong", "gravity", "invert")):
+c6 = [9.6 + 16.48 * i for i in range(6)]
+# HARM in + Pull share a block, like Mod A / B
+add(f'<rect x="{c6[4] - 7.6:.2f}" y="77.0" width="{W - 4.5 - (c6[4] - 7.6):.2f}" height="16.2" rx="1.2" fill="#DCD7CB"/>')
+for x, n in zip(c6[:4], ("length", "strong", "gravity", "invert")):
     add(text(n, x, rowC + 8.6, L))
+add(text("harm", c6[4], rowC + 8.6, 2.9, FB, INK))
+add(text("pull", c6[5], rowC + 8.6, L))
+tick(c6[5], rowC, 0, 4.9, 5.7); tick(c6[5], rowC, 0.5, 4.9, 5.7); tick(c6[5], rowC, 1, 4.9, 5.7)
 rule(93.8)
 ix = [7.6, 19.9, 32.3]
 for i, n in enumerate(("cv", "trig", "accent")):

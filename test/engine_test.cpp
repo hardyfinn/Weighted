@@ -341,6 +341,54 @@ int main() {
 		}
 	}
 
+	// HARM chord + Pull (2.5.0)
+	{
+		// C major, rock; chord = A minor (A C E) given as V/Oct from C4 = 0 V
+		float am[3] = {9 / 12.f, 0.f, 4 / 12.f};
+		int mask, croot, cthird;
+		chordFromVolts(am, 3, 0, mask, croot, cthird);
+		CHECK(mask == ((1 << 9) | (1 << 0) | (1 << 4)), "Am mask %x", mask);
+		CHECK(croot == 9 && cthird == 0, "Am root %d third %d", croot, cthird);
+		// relative to root D (2): A = 7, C = 10, E = 2
+		chordFromVolts(am, 3, 2, mask, croot, cthird);
+		CHECK(mask == ((1 << 7) | (1 << 10) | (1 << 2)) && croot == 7 && cthird == 10, "Am over D");
+
+		std::vector<UserPoint> none;
+		Settings s;
+		s.scale = 0;
+		s.profile = P_ROCK;
+		Table plain, up, down, flat;
+		buildTable(plain, s, none, nullptr, nullptr);
+		chordFromVolts(am, 3, 0, s.chordMask, s.chordRoot, s.chordThird);
+		s.pull = 0.0;
+		buildTable(flat, s, none, nullptr, nullptr);
+		s.pull = 1.0;
+		buildTable(up, s, none, nullptr, nullptr);
+		s.pull = -1.0;
+		buildTable(down, s, none, nullptr, nullptr);
+		double inP = 0, inU = 0, inD = 0, sumU = 0;
+		for (int k = 0; k < plain.n; k++) {
+			CHECK(std::fabs(flat.w[k] - plain.w[k]) < 1e-12, "pull 0 changes tone %d", k);
+			bool in = s.chordMask & (1 << plain.pc[k]);
+			if (in) { inP += plain.w[k]; inU += up.w[k]; inD += down.w[k]; }
+			sumU += up.w[k];
+		}
+		CHECK(std::fabs(sumU - 1.0) < 1e-9, "pull table sums to %g", sumU);
+		CHECK(inU > inP + 0.15 && inD < inP - 0.15, "chord share plain %.2f up %.2f down %.2f", inP, inU, inD);
+		// odds ratio chord : other moves by exactly 4 at full pull
+		int a = 5, o = 1;  // tone index 5 = A (in chord), 1 = D (not)
+		CHECK(std::fabs((up.w[a] / up.w[o]) / (plain.w[a] / plain.w[o]) - 4.0) < 1e-9, "x4 at full pull");
+		// chord landing boosts A and C only
+		CHECK(up.cland[5] > up.w[5] && up.cland[0] > up.w[0] && up.cland[2] < up.w[2], "chord landing");
+		for (int k = 0; k < plain.n; k++) CHECK(std::fabs(down.cland[k] - down.w[k]) < 1e-12, "no chord landing below noon");
+		// stacking chord tones: from A (oct 0, k 5) the next chord tones up are C and E
+		Note n;
+		n.k = 5;
+		Note c1 = addChordTones(up, n, 1, s.chordMask), c2 = addChordTones(up, n, 2, s.chordMask);
+		CHECK(c1.oct == 1 && c1.k == 0, "A + 1 chord tone = C above (%d,%d)", c1.oct, c1.k);
+		CHECK(c2.oct == 1 && c2.k == 2, "A + 2 chord tones = E above (%d,%d)", c2.oct, c2.k);
+	}
+
 	if (failures) {
 		std::printf("%d check(s) failed\n", failures);
 		return 1;
