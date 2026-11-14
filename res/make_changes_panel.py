@@ -62,3 +62,9 @@ add(text("style chords  ·  voice-led  ·  HARM to Weighted  ·  Haer", W / 2, H
 open(os.path.join(HERE, "Changes.svg"), "w").write(
     f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}mm" height="{H}mm" viewBox="0 0 {W} {H}">' + "".join(p) + "</svg>")
 print("wrote Changes.svg")
+
+# --- Haer maker logo (res/haer_logo.py), placed clear of the jacks and rail artwork
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import haer_logo
+haer_logo.add_to_file(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "Changes.svg"), x=22.64, y=126.0, cap=3.0, bg='#ECE5D8')

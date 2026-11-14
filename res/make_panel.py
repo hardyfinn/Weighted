@@ -76,3 +76,9 @@ for x, n in zip(c5, ("octave", "v/oct", "trig", "degree", "stability")):
 add(text("-3", c5[0] - 6.6, 119.8, 2.2, FM, "#9a958b")); add(text("+3", c5[0] + 6.6, 119.8, 2.2, FM, "#9a958b"))
 open(os.path.join(HERE, "Weighted.svg"), "w").write(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}mm" height="{H}mm" viewBox="0 0 {W} {H}">' + "".join(p) + "</svg>")
 print("wrote Weighted.svg")
+
+# --- Haer maker logo (res/haer_logo.py), placed clear of the jacks and rail artwork
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import haer_logo
+haer_logo.add_to_file(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "Weighted.svg"), x=50.89, y=126.4, cap=3.0, bg='#ECE8DF')
